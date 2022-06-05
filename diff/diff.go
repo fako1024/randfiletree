@@ -94,11 +94,15 @@ func buildPaths(basePath string) (nodes []Node, err error) {
 }
 
 func hashFile(file string, hashKey []byte) ([]byte, error) {
-	f, err := os.Open(file)
+	f, err := os.Open(filepath.Clean(file))
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	hash, err := highwayhash.New(hashKey)
 	if err != nil {

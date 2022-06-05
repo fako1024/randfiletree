@@ -21,7 +21,7 @@ var (
 
 func TestDefaultOptions(t *testing.T) {
 
-	path := filepath.Join(testBasePath, "randfiletree_test")
+	path := filepath.Join(testBasePath, baseDir)
 	assert.Nil(t, clearTree(path))
 
 	g := New(path)

@@ -8,7 +8,10 @@ import (
 const ()
 
 var (
+	// FileNameAlphabetBasic represents a "safe" alphabet restricted to lowercase/uppercase characters and numbers
 	FileNameAlphabetBasic = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890")
+
+	// FileNameAlphabetLinux represents an alphabet compatible with common linux systems
 	FileNameAlphabetLinux = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890!@#$%^&*()-_+= ;.,")
 )
 
@@ -80,7 +83,7 @@ func DataGeneratorRandomFixedLen(length int) DataGenerator {
 		data := make([]byte, length)
 		nRead, err := r.Read(data)
 		if err != nil || nRead != length {
-			return nil, fmt.Errorf("failed to generate random bytes: %s", err)
+			return nil, fmt.Errorf("failed to generate random bytes: %w", err)
 		}
 		return data, nil
 	}
@@ -92,7 +95,7 @@ func DataGeneratorRandom(lengthGen NumberGenerator) DataGenerator {
 		data := make([]byte, lengthGen(r))
 		nRead, err := r.Read(data)
 		if err != nil || nRead != len(data) {
-			return nil, fmt.Errorf("failed to generate random bytes: %s", err)
+			return nil, fmt.Errorf("failed to generate random bytes: %w", err)
 		}
 		return data, nil
 	}
