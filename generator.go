@@ -41,10 +41,10 @@ func New(basePath string) *Generator {
 	return &Generator{
 		basePath:       basePath,
 		dirNameGen:     StringGeneratorAlphabet(FileNameAlphabetBasic),
-		dirNameLenGen:  NumberGeneratorRandomFlat(1, 32),
+		dirNameLenGen:  NumberGeneratorRandomFlat(1, 64),
 		dirModeGen:     FileModeGeneratorConstant(0755),
-		nFilesInDirGen: NumberGeneratorRandomFlat(1, 25),
-		nDirsInDirGen:  NumberGeneratorRandomFlat(0, 15),
+		nFilesInDirGen: NumberGeneratorRandomFlat(1, 10),
+		nDirsInDirGen:  NumberGeneratorRandomFlat(0, 10),
 		fileNameGen:    StringGeneratorAlphabet(FileNameAlphabetBasic),
 		fileNameLenGen: NumberGeneratorRandomFlat(1, 64),
 		fileModeGen:    FileModeGeneratorConstant(0644),
