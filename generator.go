@@ -51,7 +51,9 @@ func New(basePath string) *Generator {
 		dataGen:        DataGeneratorRandom(NumberGeneratorRandomFlat(0, 1024)),
 		pathDepthGen:   NumberGeneratorConstant(5),
 		symlinkProbGen: BooleanGeneratorProbabilityFlat(0.1),
-		rndSrc:         rand.New(rand.NewSource(defaultSeed)),
+
+		/* #nosec G404 */
+		rndSrc: rand.New(rand.NewSource(defaultSeed)),
 	}
 }
 
