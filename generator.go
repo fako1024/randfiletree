@@ -62,6 +62,11 @@ func (g *Generator) Run() error {
 	return g.writeDir(g.basePath, 0)
 }
 
+// RemoveAll removes (and recreates) the directory
+func (g *Generator) RemoveAll() error {
+	return os.RemoveAll(g.basePath)
+}
+
 // Walk performs a recursive walk through the provided directory (wrapping filepath.Walk())
 func (g *Generator) Walk(fn filepath.WalkFunc) error {
 	return filepath.Walk(g.basePath, fn)
