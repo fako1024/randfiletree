@@ -80,6 +80,11 @@ func (g *Generator) writeDir(path string, depth int) error {
 		return nil
 	}
 
+	// Check if the directory already exists
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
 	// Create the directory
 	if err := os.MkdirAll(path, fs.FileMode(g.dirModeGen(g.rndSrc))); err != nil {
 		return err
@@ -111,6 +116,12 @@ func (g *Generator) writeDir(path string, depth int) error {
 
 func (g *Generator) writeFileInDir(dir string) error {
 	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
+
+	// Check if the file already exists
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
 	mode := g.fileModeGen(g.rndSrc)
 	data, err := g.dataGen(g.rndSrc)
 	if err != nil {
@@ -126,5 +137,11 @@ func (g *Generator) writeFileInDir(dir string) error {
 
 func (g *Generator) writeSymlinkInDir(dir, target string) error {
 	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
+
+	// Check if the link already exists
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
 	return os.Symlink(target, path)
 }
