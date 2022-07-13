@@ -22,9 +22,9 @@ var (
 func TestDefaultOptions(t *testing.T) {
 
 	path := filepath.Join(testBasePath, baseDir)
-	assert.Nil(t, clearTree(path))
 
 	g := New(path)
+	assert.Nil(t, g.RemoveAll())
 	assert.Nil(t, g.Run())
 	n := 0
 	assert.Nil(t, g.Walk(func(path string, info fs.FileInfo, err error) error {
@@ -50,8 +50,4 @@ func TestMain(m *testing.M) {
 		testBasePath = strings.TrimSuffix(os.TempDir(), "/")
 	}
 	os.Exit(m.Run())
-}
-
-func clearTree(path string) error {
-	return os.RemoveAll(path)
 }
