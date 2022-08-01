@@ -81,7 +81,7 @@ func (g *Generator) writeDir(path string, depth int) error {
 	}
 
 	// Check if the directory already exists
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Stat(path); depth > 1 && err == nil {
 		return nil
 	}
 
