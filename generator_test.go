@@ -26,20 +26,20 @@ func TestDefaultOptions(t *testing.T) {
 	g := New(path)
 	assert.Nil(t, g.RemoveAll())
 	assert.Nil(t, g.Run())
-	n := 0
+	n1 := 0
 	assert.Nil(t, g.Walk(func(path string, info fs.FileInfo, err error) error {
-		n++
+		n1++
 		return nil
 	}))
-	fmt.Println("Number of tree elements after first run:", n)
 
 	assert.Nil(t, g.Run())
-	n = 0
+	n2 := 0
 	assert.Nil(t, g.Walk(func(path string, info fs.FileInfo, err error) error {
-		n++
+		n2++
 		return nil
 	}))
-	fmt.Println("Number of tree elements after second run:", n)
+
+	assert.Greater(t, n2, n1)
 }
 
 func TestMain(m *testing.M) {
