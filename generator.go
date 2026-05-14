@@ -1,8 +1,8 @@
 package randfiletree
 
 import (
+	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -31,7 +31,8 @@ type Generator struct {
 	dataGen      DataGenerator
 	pathDepthGen NumberGenerator
 
-	symlinkProbGen BooleanGenerator
+	symlinkProbGen    BooleanGenerator
+	symlinkRelProbGen BooleanGenerator
 
 	rndSrc *rand.Rand
 }
@@ -39,18 +40,19 @@ type Generator struct {
 // New instantiates a new generator
 func New(basePath string) *Generator {
 	return &Generator{
-		basePath:       basePath,
-		dirNameGen:     StringGeneratorAlphabet(FileNameAlphabetBasic),
-		dirNameLenGen:  NumberGeneratorRandomFlat(1, 64),
-		dirModeGen:     FileModeGeneratorConstant(0755),
-		nFilesInDirGen: NumberGeneratorRandomFlat(1, 10),
-		nDirsInDirGen:  NumberGeneratorRandomFlat(0, 10),
-		fileNameGen:    StringGeneratorAlphabet(FileNameAlphabetBasic),
-		fileNameLenGen: NumberGeneratorRandomFlat(1, 64),
-		fileModeGen:    FileModeGeneratorConstant(0644),
-		dataGen:        DataGeneratorRandom(NumberGeneratorRandomFlat(0, 1024)),
-		pathDepthGen:   NumberGeneratorConstant(5),
-		symlinkProbGen: BooleanGeneratorProbabilityFlat(0.1),
+		basePath:          basePath,
+		dirNameGen:        StringGeneratorAlphabet(FileNameAlphabetBasic),
+		dirNameLenGen:     NumberGeneratorRandomFlat(1, 64),
+		dirModeGen:        FileModeGeneratorConstant(0755),
+		nFilesInDirGen:    NumberGeneratorRandomFlat(1, 10),
+		nDirsInDirGen:     NumberGeneratorRandomFlat(0, 10),
+		fileNameGen:       StringGeneratorAlphabet(FileNameAlphabetBasic),
+		fileNameLenGen:    NumberGeneratorRandomFlat(1, 64),
+		fileModeGen:       FileModeGeneratorConstant(0644),
+		dataGen:           DataGeneratorRandom(NumberGeneratorRandomFlat(0, 1024)),
+		pathDepthGen:      NumberGeneratorConstant(5),
+		symlinkProbGen:    BooleanGeneratorProbabilityFlat(0.1),
+		symlinkRelProbGen: BooleanGeneratorProbabilityFlat(0.2),
 
 		/* #nosec G404 */
 		rndSrc: rand.New(rand.NewSource(defaultSeed)),
@@ -104,8 +106,14 @@ func (g *Generator) writeDir(path string, depth int) error {
 				return err
 			}
 		} else {
-			if err := g.writeFileInDir(path); err != nil {
+			createdPath, created, err := g.writeFileInDir(path)
+			if err != nil {
 				return err
+			}
+			if created && g.symlinkRelProbGen(g.rndSrc) {
+				if err := g.writeRelSymlink(path, createdPath); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -114,34 +122,55 @@ func (g *Generator) writeDir(path string, depth int) error {
 	return nil
 }
 
-func (g *Generator) writeFileInDir(dir string) error {
+func (g *Generator) writeFileInDir(dir string) (string, bool, error) {
 	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
 
 	// Check if the file already exists
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	if _, err := os.Lstat(path); err == nil {
+		return "", false, nil
 	}
 
 	mode := g.fileModeGen(g.rndSrc)
 	data, err := g.dataGen(g.rndSrc)
 	if err != nil {
-		return err
+		return "", false, err
 	}
 
-	defer func() {
-		g.lastPath = path
-	}()
+	if err := os.WriteFile(path, data, fs.FileMode(mode)); err != nil {
+		return "", false, err
+	}
 
-	return ioutil.WriteFile(path, data, fs.FileMode(mode))
+	g.lastPath = path
+
+	return path, true, nil
 }
 
 func (g *Generator) writeSymlinkInDir(dir, target string) error {
 	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
 
 	// Check if the link already exists
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Lstat(path); err == nil {
 		return nil
 	}
 
 	return os.Symlink(target, path)
+}
+
+func (g *Generator) writeRelSymlink(dir, target string) error {
+	if target == "" {
+		return fmt.Errorf("empty symlink target")
+	}
+
+	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
+	relTarget, err := filepath.Rel(dir, target)
+	if err != nil {
+		return fmt.Errorf("failed to derive relative symlink target for `%s`: %w", target, err)
+	}
+
+	// Check if the link already exists
+	if _, err := os.Lstat(path); err == nil {
+		return nil
+	}
+
+	return os.Symlink(relTarget, path)
 }
