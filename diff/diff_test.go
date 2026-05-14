@@ -1,48 +1,95 @@
 package diff
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/fako1024/randfiletree"
-	"github.com/stretchr/testify/assert"
-)
-
-const (
-	baseDir = "randfiletree_diff_test"
-)
-
-var (
-	testBasePath = "/dev/shm"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRandomTree(t *testing.T) {
+	t.Parallel()
 
-	path := filepath.Join(testBasePath, baseDir)
-	assert.Nil(t, clearTree(path))
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
 
-	g := randfiletree.New(path)
-	assert.Nil(t, g.Run())
+	require.NoError(t, os.MkdirAll(filepath.Join(pathA, "sub"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(pathB, "sub"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "file1.txt"), []byte("test content"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "file1.txt"), []byte("test content"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "sub", "file2.txt"), []byte("other content"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "sub", "file2.txt"), []byte("other content"), 0o600))
 
-	if err := Paths(path, path); err != nil {
-		t.Fatal(err)
-	}
-
+	require.NoError(t, Paths(pathA, pathB))
 }
 
-func TestMain(m *testing.M) {
+func TestExpectedFailures(t *testing.T) {
+	t.Parallel()
 
-	// Ascertain that the base path exists
-	if _, err := os.Stat(testBasePath); err != nil {
-		fmt.Printf("cannot ascertain existence of base path `%s` for testing, falling back: %s\n", testBasePath, err)
-		testBasePath = strings.TrimSuffix(os.TempDir(), "/")
-	}
-	os.Exit(m.Run())
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "file.txt"), []byte("left"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "file.txt"), []byte("right"), 0o600))
+
+	err := Paths(pathA, pathB)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "mismatch (-want +got)")
 }
 
-func clearTree(path string) error {
-	return os.RemoveAll(path)
+func TestSymlinkTargetMismatch(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "target_a.txt"), []byte("a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "target_b.txt"), []byte("b"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "target_a.txt"), []byte("a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "target_b.txt"), []byte("b"), 0o600))
+
+	require.NoError(t, os.Symlink("target_a.txt", filepath.Join(pathA, "link.txt")))
+	require.NoError(t, os.Symlink("target_b.txt", filepath.Join(pathB, "link.txt")))
+
+	err := Paths(pathA, pathB)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "LinkTarget")
+}
+
+func TestDanglingSymlinkParity(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+	require.NoError(t, os.Symlink("missing_target", filepath.Join(pathA, "link.txt")))
+	require.NoError(t, os.Symlink("missing_target", filepath.Join(pathB, "link.txt")))
+
+	require.NoError(t, Paths(pathA, pathB))
+}
+
+func requireSymlinkSupport(t *testing.T) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target.txt")
+	link := filepath.Join(tmpDir, "link.txt")
+
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not supported in this test environment: %s", err)
+	}
 }

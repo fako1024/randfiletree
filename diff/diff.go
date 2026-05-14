@@ -19,7 +19,8 @@ var hashKey []byte
 
 // Node denotes an element / node in a file tree
 type Node struct {
-	Path string
+	Path       string
+	LinkTarget string
 
 	Size    int64
 	Mode    fs.FileMode
@@ -70,6 +71,12 @@ func buildPaths(basePath string) (nodes []Node, err error) {
 		}
 		if node.Path == "" {
 			return nil
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			node.LinkTarget, err = os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("failed to read symlink target `%s`: %w", path, err)
+			}
 		}
 		if info.Mode().IsRegular() {
 			node.Size = info.Size()
