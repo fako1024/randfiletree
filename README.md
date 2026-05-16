@@ -31,3 +31,10 @@ Supported symlink strategies:
 - `SymlinkStrategyCycle`
 
 `diff.Paths` validates both symlink target parity and hardlink topology parity.
+
+For configurable strictness, use `diff.PathsWithOptions`:
+
+- `diff.DefaultOptions()` keeps compatibility with `diff.Paths`.
+- `diff.StrictLinuxOptions()` enables ownership and nanosecond mtime checks.
+- `Options` can independently toggle content hash, timestamp precision,
+  ownership, hardlink topology, and future xattr/ACL comparator hooks.
