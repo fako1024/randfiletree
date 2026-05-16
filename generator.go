@@ -32,6 +32,9 @@ type Generator struct {
 
 	symlinkProbGen    BooleanGenerator
 	symlinkRelProbGen BooleanGenerator
+	hardlinkProbGen   BooleanGenerator
+
+	symlinkStrategyGen SymlinkStrategyGenerator
 
 	rndSrc  *rand.Rand
 	runMode RunMode
@@ -86,11 +89,13 @@ func (g *Generator) hasNoConfiguration() bool {
 		g.dataGen == nil &&
 		g.pathDepthGen == nil &&
 		g.symlinkProbGen == nil &&
-		g.symlinkRelProbGen == nil
+		g.symlinkRelProbGen == nil &&
+		g.hardlinkProbGen == nil &&
+		g.symlinkStrategyGen == nil
 }
 
 func (g *Generator) validateRunConfiguration() error {
-	missing := make([]string, 0, 13)
+	missing := make([]string, 0, 15)
 
 	if g.rndSrc == nil {
 		missing = append(missing, "random source")
@@ -128,8 +133,8 @@ func (g *Generator) validateRunConfiguration() error {
 	if g.symlinkProbGen == nil {
 		missing = append(missing, "symlink generator")
 	}
-	if g.symlinkRelProbGen == nil {
-		missing = append(missing, "relative symlink generator")
+	if g.symlinkRelProbGen == nil && g.symlinkStrategyGen == nil {
+		missing = append(missing, "relative symlink generator or symlink strategy generator")
 	}
 	if err := validateRunMode(g.runMode); err != nil {
 		missing = append(missing, err.Error())
@@ -140,6 +145,30 @@ func (g *Generator) validateRunConfiguration() error {
 	}
 
 	return nil
+}
+
+func (g *Generator) shouldPlanHardlink(r *rand.Rand) bool {
+	if g.hardlinkProbGen == nil {
+		return false
+	}
+
+	return g.hardlinkProbGen(r)
+}
+
+func (g *Generator) hasExplicitSymlinkStrategy() bool {
+	return g.symlinkStrategyGen != nil
+}
+
+func (g *Generator) nextSymlinkStrategy(r *rand.Rand) SymlinkStrategy {
+	if g.symlinkStrategyGen != nil {
+		return g.symlinkStrategyGen(r)
+	}
+
+	if g.symlinkRelProbGen != nil && g.symlinkRelProbGen(r) {
+		return SymlinkStrategyRelative
+	}
+
+	return SymlinkStrategyAbsolute
 }
 
 // RemoveAll removes (and recreates) the directory

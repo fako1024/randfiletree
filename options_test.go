@@ -128,6 +128,24 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			},
 		},
 		{
+			name: "WithHardlinkGenerator",
+			option: WithHardlinkGenerator(func(r *rand.Rand) bool {
+				return true
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				require.True(t, g.hardlinkProbGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithSymlinkStrategyGenerator",
+			option: WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
+				return SymlinkStrategyDangling
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, SymlinkStrategyDangling, g.symlinkStrategyGen(g.rndSrc))
+			},
+		},
+		{
 			name:   "WithSymlinkProbability",
 			option: WithSymlinkProbability(1),
 			assert: func(t *testing.T, g *Generator) {
@@ -142,6 +160,26 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			assert: func(t *testing.T, g *Generator) {
 				for i := 0; i < 16; i++ {
 					require.False(t, g.symlinkRelProbGen(g.rndSrc))
+				}
+			},
+		},
+		{
+			name:   "WithHardlinkProbability",
+			option: WithHardlinkProbability(1),
+			assert: func(t *testing.T, g *Generator) {
+				for i := 0; i < 16; i++ {
+					require.True(t, g.hardlinkProbGen(g.rndSrc))
+				}
+			},
+		},
+		{
+			name: "WithSymlinkStrategyProbabilities",
+			option: WithSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{
+				SymlinkStrategyCycle: 1,
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				for i := 0; i < 16; i++ {
+					require.Equal(t, SymlinkStrategyCycle, g.symlinkStrategyGen(g.rndSrc))
 				}
 			},
 		},
@@ -275,6 +313,16 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			errContains: "relative symlink generator must not be nil",
 		},
 		{
+			name:        "NilHardlinkGenerator",
+			option:      WithHardlinkGenerator(nil),
+			errContains: "hardlink generator must not be nil",
+		},
+		{
+			name:        "NilSymlinkStrategyGenerator",
+			option:      WithSymlinkStrategyGenerator(nil),
+			errContains: "symlink strategy generator must not be nil",
+		},
+		{
 			name:        "NegativeSymlinkProbability",
 			option:      WithSymlinkProbability(-0.1),
 			errContains: "symlink probability must be within [0, 1]",
@@ -293,6 +341,37 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			name:        "InfiniteRelativeSymlinkProbability",
 			option:      WithRelativeSymlinkProbability(math.Inf(1)),
 			errContains: "relative symlink probability must be finite",
+		},
+		{
+			name:        "InfiniteHardlinkProbability",
+			option:      WithHardlinkProbability(math.Inf(1)),
+			errContains: "hardlink probability must be finite",
+		},
+		{
+			name:        "EmptySymlinkStrategyProbabilities",
+			option:      WithSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{}),
+			errContains: "symlink strategy probabilities must not be empty",
+		},
+		{
+			name: "InvalidSymlinkStrategyProbabilities",
+			option: WithSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{
+				SymlinkStrategy(255): 1,
+			}),
+			errContains: "invalid symlink strategy",
+		},
+		{
+			name: "NegativeSymlinkStrategyProbabilities",
+			option: WithSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{
+				SymlinkStrategyRelative: -0.1,
+			}),
+			errContains: "must be >= 0",
+		},
+		{
+			name: "ZeroSymlinkStrategyProbabilities",
+			option: WithSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{
+				SymlinkStrategyRelative: 0,
+			}),
+			errContains: "sum of symlink strategy probabilities must be > 0",
 		},
 		{
 			name:        "NegativeDirNameLengthRange",
@@ -394,6 +473,7 @@ func TestNewWithOptions(t *testing.T) {
 			WithDataGenerator(DataGeneratorFixedString("")),
 			WithSymlinkGenerator(func(r *rand.Rand) bool { return false }),
 			WithRelativeSymlinkGenerator(func(r *rand.Rand) bool { return false }),
+			WithHardlinkGenerator(func(r *rand.Rand) bool { return false }),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, g)
