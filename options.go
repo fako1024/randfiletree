@@ -48,6 +48,19 @@ func WithSeed(seed int64) Option {
 	}
 }
 
+// WithRunMode sets the run mode used when applying generated plans.
+func WithRunMode(mode RunMode) Option {
+	return func(g *Generator) error {
+		if err := validateRunMode(mode); err != nil {
+			return err
+		}
+
+		g.runMode = mode
+
+		return nil
+	}
+}
+
 // WithDirNameGenerator sets the generator used for directory names.
 func WithDirNameGenerator(gen FileNameGenerator) Option {
 	return func(g *Generator) error {
