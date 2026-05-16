@@ -77,6 +77,24 @@ func (g *Generator) Run() error {
 	return nil
 }
 
+// GenerateOperations creates a deterministic operation stream against the generator base path.
+func (g *Generator) GenerateOperations(opts OperationGenerationOptions) ([]Operation, error) {
+	if g == nil {
+		return nil, fmt.Errorf("nil generator")
+	}
+
+	return GenerateOperations(g.basePath, opts)
+}
+
+// ApplyOperations applies operation streams against the generator base path.
+func (g *Generator) ApplyOperations(ops []Operation) error {
+	if g == nil {
+		return fmt.Errorf("nil generator")
+	}
+
+	return ApplyOperations(g.basePath, ops)
+}
+
 func (g *Generator) hasNoConfiguration() bool {
 	return g.dirNameGen == nil &&
 		g.dirNameLenGen == nil &&
