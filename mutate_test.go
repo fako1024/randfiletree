@@ -286,6 +286,11 @@ func TestApplyOperationsTableDriven(t *testing.T) {
 			verify: func(t *testing.T, base string) {
 				info, err := os.Stat(filepath.Join(base, "chmod.txt"))
 				require.NoError(t, err)
+				if runtime.GOOS == "windows" {
+					require.NotZero(t, info.Mode().Perm()&0o200)
+					return
+				}
+
 				require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
 			},
 		},
