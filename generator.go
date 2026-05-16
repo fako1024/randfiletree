@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -40,19 +41,7 @@ type Generator struct {
 // New instantiates a new generator
 func New(basePath string) *Generator {
 	return &Generator{
-		basePath:          basePath,
-		dirNameGen:        StringGeneratorAlphabet(FileNameAlphabetBasic),
-		dirNameLenGen:     NumberGeneratorRandomFlat(1, 64),
-		dirModeGen:        FileModeGeneratorConstant(0755),
-		nFilesInDirGen:    NumberGeneratorRandomFlat(1, 10),
-		nDirsInDirGen:     NumberGeneratorRandomFlat(0, 10),
-		fileNameGen:       StringGeneratorAlphabet(FileNameAlphabetBasic),
-		fileNameLenGen:    NumberGeneratorRandomFlat(1, 64),
-		fileModeGen:       FileModeGeneratorConstant(0644),
-		dataGen:           DataGeneratorRandom(NumberGeneratorRandomFlat(0, 1024)),
-		pathDepthGen:      NumberGeneratorConstant(5),
-		symlinkProbGen:    BooleanGeneratorProbabilityFlat(0.1),
-		symlinkRelProbGen: BooleanGeneratorProbabilityFlat(0.2),
+		basePath: basePath,
 
 		/* #nosec G404 */
 		rndSrc: rand.New(rand.NewSource(defaultSeed)),
@@ -61,7 +50,84 @@ func New(basePath string) *Generator {
 
 // Run generates a new tree (or adds to an existing one) according to the defined rules
 func (g *Generator) Run() error {
+	if g == nil {
+		return fmt.Errorf("nil generator")
+	}
+
+	if g.hasNoConfiguration() {
+		return nil
+	}
+
+	if err := g.validateRunConfiguration(); err != nil {
+		return err
+	}
+
 	return g.writeDir(g.basePath, 0)
+}
+
+func (g *Generator) hasNoConfiguration() bool {
+	return g.dirNameGen == nil &&
+		g.dirNameLenGen == nil &&
+		g.dirModeGen == nil &&
+		g.nFilesInDirGen == nil &&
+		g.nDirsInDirGen == nil &&
+		g.fileNameGen == nil &&
+		g.fileNameLenGen == nil &&
+		g.fileModeGen == nil &&
+		g.dataGen == nil &&
+		g.pathDepthGen == nil &&
+		g.symlinkProbGen == nil &&
+		g.symlinkRelProbGen == nil
+}
+
+func (g *Generator) validateRunConfiguration() error {
+	missing := make([]string, 0, 13)
+
+	if g.rndSrc == nil {
+		missing = append(missing, "random source")
+	}
+	if g.dirNameGen == nil {
+		missing = append(missing, "directory name generator")
+	}
+	if g.dirNameLenGen == nil {
+		missing = append(missing, "directory name length generator")
+	}
+	if g.dirModeGen == nil {
+		missing = append(missing, "directory mode generator")
+	}
+	if g.nFilesInDirGen == nil {
+		missing = append(missing, "files-per-directory generator")
+	}
+	if g.nDirsInDirGen == nil {
+		missing = append(missing, "directories-per-directory generator")
+	}
+	if g.fileNameGen == nil {
+		missing = append(missing, "file name generator")
+	}
+	if g.fileNameLenGen == nil {
+		missing = append(missing, "file name length generator")
+	}
+	if g.fileModeGen == nil {
+		missing = append(missing, "file mode generator")
+	}
+	if g.dataGen == nil {
+		missing = append(missing, "data generator")
+	}
+	if g.pathDepthGen == nil {
+		missing = append(missing, "path depth generator")
+	}
+	if g.symlinkProbGen == nil {
+		missing = append(missing, "symlink generator")
+	}
+	if g.symlinkRelProbGen == nil {
+		missing = append(missing, "relative symlink generator")
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("generator configuration incomplete, missing: %s", strings.Join(missing, ", "))
+	}
+
+	return nil
 }
 
 // RemoveAll removes (and recreates) the directory
