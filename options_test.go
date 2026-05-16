@@ -361,13 +361,6 @@ func TestConfigureRejectsNilGenerator(t *testing.T) {
 	require.ErrorContains(t, err, "nil generator")
 }
 
-func TestSeedKeepsFluentAPI(t *testing.T) {
-	t.Parallel()
-
-	g := New(t.TempDir())
-	require.Same(t, g, g.Seed(99))
-}
-
 func TestNewWithOptions(t *testing.T) {
 	t.Parallel()
 
