@@ -38,3 +38,19 @@ For configurable strictness, use `diff.PathsWithOptions`:
 - `diff.StrictLinuxOptions()` enables ownership and nanosecond mtime checks.
 - `Options` can independently toggle content hash, timestamp precision,
   ownership, hardlink topology, and future xattr/ACL comparator hooks.
+
+## Mutation Engine
+
+`randfiletree` supports deterministic mutation streams for multi-snapshot tests.
+
+- Define explicit `Operation` values and apply them with `ApplyOperations(basePath, ops)`.
+- Generate deterministic streams from a baseline tree with
+  `GenerateOperations(basePath, opts)` or `(*Generator).GenerateOperations(opts)`.
+- Export replay specs for CI diagnostics with `ExportOperationSpec(ops)` and parse
+  with `ParseOperationSpec(spec)`.
+
+Supported operation kinds include create (file/dir/symlink/hardlink), delete,
+rename, chmod/chown, truncate, append, overwrite-range, and xattr placeholders.
+
+`set-xattr` and `remove-xattr` are currently placeholders and return
+`ErrXAttrPlaceholderUnsupported` when applied.
