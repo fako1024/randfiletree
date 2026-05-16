@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/minio/highwayhash"
 )
@@ -31,8 +30,13 @@ func collectPaths(basePath string, opts Options) (result collectedPaths, err err
 			return fmt.Errorf("failed to access path `%s`: %w", path, walkErr)
 		}
 
+		nodePath, err := canonicalNodePath(basePath, path)
+		if err != nil {
+			return err
+		}
+
 		node := Node{
-			Path:        strings.TrimPrefix(path, basePath),
+			Path:        nodePath,
 			Mode:        info.Mode(),
 			ModTime:     info.ModTime().Unix(),
 			ModTimeNsec: info.ModTime().UnixNano(),
@@ -87,6 +91,19 @@ func collectPaths(basePath string, opts Options) (result collectedPaths, err err
 	}
 
 	return result, nil
+}
+
+func canonicalNodePath(basePath, path string) (string, error) {
+	relPath, err := filepath.Rel(basePath, path)
+	if err != nil {
+		return "", fmt.Errorf("failed to determine relative path for `%s`: %w", path, err)
+	}
+
+	if relPath == "." {
+		return "", nil
+	}
+
+	return "/" + filepath.ToSlash(relPath), nil
 }
 
 func buildHardlinkGroups(pathsByIdentity map[fileIdentity][]string) [][]string {
