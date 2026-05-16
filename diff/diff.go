@@ -1,162 +1,138 @@
 package diff
 
 import (
-	"encoding/hex"
 	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/minio/highwayhash"
 )
-
-var hashKey []byte
-
-// Node denotes an element / node in a file tree
-type Node struct {
-	Path       string
-	LinkTarget string
-
-	Size    int64
-	Mode    fs.FileMode
-	ModTime int64
-
-	Hash []byte
-}
-
-type collectedPaths struct {
-	nodes          []Node
-	hardlinkGroups [][]string
-}
-
-func init() {
-	var err error
-	hashKey, err = hex.DecodeString("000102030405060708090A0B0C0D0E0FF0E0D0C0B0A090807060504030201000")
-	if err != nil {
-		panic(err)
-	}
-}
 
 // Paths performs a recursive diff of two file trees / paths
 // Any deviation will result in an error denoting the respective diff
 func Paths(a, b string) error {
+	return PathsWithOptions(a, b, DefaultOptions())
+}
 
-	pathsA, err := buildPaths(a)
+// PathsWithOptions performs a recursive diff of two file trees / paths
+// using explicit comparison options.
+func PathsWithOptions(a, b string, opts Options) error {
+	if err := opts.validate(); err != nil {
+		return fmt.Errorf("invalid diff options: %w", err)
+	}
+
+	pathsA, err := collectPaths(a, opts)
 	if err != nil {
 		return err
 	}
 
-	pathsB, err := buildPaths(b)
+	pathsB, err := collectPaths(b, opts)
 	if err != nil {
 		return err
 	}
 
-	if diff := cmp.Diff(pathsA.nodes, pathsB.nodes, cmpopts.IgnoreUnexported()); diff != "" {
+	if err := ensureOwnershipMetadata(pathsA.nodes, pathsB.nodes, opts); err != nil {
+		return err
+	}
+
+	if diff := cmp.Diff(projectNodes(pathsA.nodes, opts), projectNodes(pathsB.nodes, opts)); diff != "" {
 		return fmt.Errorf("mismatch (-want +got):\n%s", diff)
 	}
 
-	if diff := cmp.Diff(pathsA.hardlinkGroups, pathsB.hardlinkGroups); diff != "" {
-		return fmt.Errorf("hardlink topology mismatch (-want +got):\n%s", diff)
+	if opts.CompareHardlinkTopology {
+		if diff := cmp.Diff(pathsA.hardlinkGroups, pathsB.hardlinkGroups); diff != "" {
+			return fmt.Errorf("hardlink topology mismatch (-want +got):\n%s", diff)
+		}
+	}
+
+	if err := runMetadataHooks(pathsA.nodes, pathsB.nodes, opts); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func buildPaths(basePath string) (result collectedPaths, err error) {
-	hardlinkPathsByKey := map[fileIdentity][]string{}
-
-	err = filepath.Walk(basePath, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return fmt.Errorf("failed to accecss path `%s`: %w", path, err)
-		}
-
-		node := Node{
-			Path:    strings.TrimPrefix(path, basePath),
-			Mode:    info.Mode(),
-			ModTime: info.ModTime().Unix(),
-		}
-		if node.Path == "" {
-			return nil
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			node.LinkTarget, err = os.Readlink(path)
-			if err != nil {
-				return fmt.Errorf("failed to read symlink target `%s`: %w", path, err)
-			}
-		}
-		if info.Mode().IsRegular() {
-			node.Size = info.Size()
-			node.Hash, err = hashFile(path, hashKey)
-			if err != nil {
-				return err
-			}
-
-			identity, identityOK := fileIdentityFromPath(path)
-			if identityOK {
-				hardlinkPathsByKey[identity] = append(hardlinkPathsByKey[identity], node.Path)
-			}
-		}
-		result.nodes = append(result.nodes, node)
-
+func ensureOwnershipMetadata(nodesA, nodesB []Node, opts Options) error {
+	if !opts.CompareOwnership {
 		return nil
-	})
-	if err != nil {
-		return
 	}
 
-	sort.Slice(result.nodes, func(i, j int) bool {
-		return result.nodes[i].Path < result.nodes[j].Path
-	})
+	for _, node := range nodesA {
+		if !node.HasOwnership {
+			return fmt.Errorf("ownership comparison requested but metadata unavailable for left path `%s`", node.Path)
+		}
+	}
 
-	result.hardlinkGroups = buildHardlinkGroups(hardlinkPathsByKey)
+	for _, node := range nodesB {
+		if !node.HasOwnership {
+			return fmt.Errorf("ownership comparison requested but metadata unavailable for right path `%s`", node.Path)
+		}
+	}
 
-	return
+	return nil
 }
 
-func buildHardlinkGroups(pathsByIdentity map[fileIdentity][]string) [][]string {
-	groups := make([][]string, 0, len(pathsByIdentity))
-	for _, paths := range pathsByIdentity {
-		if len(paths) < 2 {
-			continue
-		}
+type projectedNode struct {
+	Path       string
+	LinkTarget string
 
-		group := append([]string(nil), paths...)
-		sort.Strings(group)
-		groups = append(groups, group)
-	}
+	Size    int64
+	Mode    uint32
+	ModTime int64
 
-	sort.Slice(groups, func(i, j int) bool {
-		if len(groups[i]) == 0 || len(groups[j]) == 0 {
-			return len(groups[i]) < len(groups[j])
-		}
+	Hash []byte
 
-		return groups[i][0] < groups[j][0]
-	})
-
-	return groups
+	UID uint32
+	GID uint32
 }
 
-func hashFile(file string, hashKey []byte) ([]byte, error) {
-	f, err := os.Open(filepath.Clean(file))
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil && err == nil {
-			err = closeErr
+func projectNodes(nodes []Node, opts Options) []projectedNode {
+	projected := make([]projectedNode, len(nodes))
+
+	for i, node := range nodes {
+		projectedNode := projectedNode{
+			Path:       node.Path,
+			LinkTarget: node.LinkTarget,
+			Size:       node.Size,
+			Mode:       uint32(node.Mode),
+			ModTime:    node.ModTime,
 		}
-	}()
 
-	hash, err := highwayhash.New(hashKey)
-	if err != nil {
-		return nil, err
+		if opts.TimestampPrecision == TimestampPrecisionNanoseconds {
+			projectedNode.ModTime = node.ModTimeNsec
+		}
+
+		if opts.CompareContentHash {
+			projectedNode.Hash = node.Hash
+		}
+
+		if opts.CompareOwnership {
+			projectedNode.UID = node.UID
+			projectedNode.GID = node.GID
+		}
+
+		projected[i] = projectedNode
 	}
 
-	_, err = io.Copy(hash, f)
-	return hash.Sum(nil), err
+	return projected
+}
+
+func runMetadataHooks(nodesA, nodesB []Node, opts Options) error {
+	if !opts.CompareXAttrs && !opts.CompareACLs {
+		return nil
+	}
+
+	for i := range nodesA {
+		if opts.CompareXAttrs {
+			if err := opts.XAttrComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
+				return fmt.Errorf("xattr mismatch for path `%s`: %w", nodesA[i].Path, err)
+			}
+		}
+
+		if opts.CompareACLs {
+			if err := opts.ACLComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
+				return fmt.Errorf("ACL mismatch for path `%s`: %w", nodesA[i].Path, err)
+			}
+		}
+	}
+
+	return nil
 }
