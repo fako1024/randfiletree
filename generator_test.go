@@ -40,6 +40,253 @@ func TestRunRejectsIncompleteConfigurationWithoutPanic(t *testing.T) {
 	require.ErrorContains(t, err, "directory name generator")
 }
 
+func TestPlanRunDeterministicForSameSeedAndOptions(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+
+	newConfigured := func() *Generator {
+		g := New(base)
+		require.NoError(t, g.Configure(
+			WithSeed(42),
+			WithRunMode(RunModeStrict),
+			WithDirNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+			WithDirNameLengthGenerator(NumberGeneratorConstant(8)),
+			WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+			WithFilesPerDirectoryGenerator(NumberGeneratorConstant(2)),
+			WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+			WithFileNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+			WithFileNameLengthGenerator(NumberGeneratorConstant(8)),
+			WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+			WithDataGenerator(DataGeneratorRandomFixedLen(16)),
+			WithPathDepthGenerator(NumberGeneratorConstant(2)),
+			WithSymlinkProbability(0),
+			WithRelativeSymlinkProbability(0),
+		))
+
+		return g
+	}
+
+	gA := newConfigured()
+	gB := newConfigured()
+
+	planA, err := gA.planRun()
+	require.NoError(t, err)
+
+	planB, err := gB.planRun()
+	require.NoError(t, err)
+
+	require.Equal(t, planA, planB)
+}
+
+func TestRunReturnsDeterministicCollisionError(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+
+	newConfigured := func() *Generator {
+		g := New(base)
+		require.NoError(t, g.Configure(
+			WithRunMode(RunModeAppend),
+			WithSeed(1),
+			WithDirNameGenerator(func(r *rand.Rand, length int) string {
+				return "d"
+			}),
+			WithDirNameLengthGenerator(NumberGeneratorConstant(1)),
+			WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+			WithFilesPerDirectoryGenerator(NumberGeneratorConstant(2)),
+			WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+			WithFileNameGenerator(func(r *rand.Rand, length int) string {
+				return "x"
+			}),
+			WithFileNameLengthGenerator(NumberGeneratorConstant(1)),
+			WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+			WithDataGenerator(DataGeneratorFixedString("payload")),
+			WithPathDepthGenerator(NumberGeneratorConstant(1)),
+			WithSymlinkProbability(0),
+			WithRelativeSymlinkProbability(0),
+		))
+
+		return g
+	}
+
+	errA := newConfigured().Run()
+	require.Error(t, errA)
+	require.ErrorIs(t, errA, ErrPlanPathCollisionExhausted)
+
+	errB := newConfigured().Run()
+	require.Error(t, errB)
+	require.ErrorIs(t, errB, ErrPlanPathCollisionExhausted)
+
+	require.Equal(t, errA.Error(), errB.Error())
+	_, err := os.Stat(base)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestRunModeAppendRecursesIntoExistingDirectory(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+	existing := filepath.Join(base, "dir")
+	require.NoError(t, os.MkdirAll(existing, 0o750))
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			return "file"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(4)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(2)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+	))
+
+	require.NoError(t, g.Run())
+
+	info, err := os.Lstat(filepath.Join(existing, "file"))
+	require.NoError(t, err)
+	require.True(t, info.Mode().IsRegular())
+}
+
+func TestRunModeStrictFailsOnExistingPath(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+	require.NoError(t, os.MkdirAll(base, 0o750))
+
+	existingFile := filepath.Join(base, "file")
+	require.NoError(t, os.WriteFile(existingFile, []byte("keep"), 0o600))
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeStrict),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			return "file"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(4)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("new")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+	))
+
+	err := g.Run()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "strict mode")
+	require.ErrorContains(t, err, existingFile)
+
+	data, readErr := os.ReadFile(existingFile)
+	require.NoError(t, readErr)
+	require.Equal(t, "keep", string(data))
+}
+
+func TestRunModeReplaceClearsBasePathBeforeApply(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+	legacyFile := filepath.Join(base, "legacy")
+	require.NoError(t, os.MkdirAll(base, 0o750))
+	require.NoError(t, os.WriteFile(legacyFile, []byte("legacy"), 0o600))
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeReplace),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			return "fresh"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(5)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("new")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+	))
+
+	require.NoError(t, g.Run())
+
+	_, err := os.Stat(legacyFile)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	newFileInfo, err := os.Stat(filepath.Join(base, "fresh"))
+	require.NoError(t, err)
+	require.True(t, newFileInfo.Mode().IsRegular())
+}
+
+func TestRunDoesNotLeakLastPathAcrossRuns(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+	g := New(base)
+
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			return "first"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(5)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("first")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+	))
+	require.NoError(t, g.Run())
+
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			return "second"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(6)),
+		WithDataGenerator(DataGeneratorFixedString("second")),
+		WithSymlinkGenerator(func(r *rand.Rand) bool {
+			return true
+		}),
+		WithRelativeSymlinkProbability(0),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+	))
+	require.NoError(t, g.Run())
+
+	info, err := os.Lstat(filepath.Join(base, "second"))
+	require.NoError(t, err)
+	require.Zero(t, info.Mode()&os.ModeSymlink)
+	require.True(t, info.Mode().IsRegular())
+}
+
 func TestWriteRelSymlinkUsesDirectoryRelativeTarget(t *testing.T) {
 	t.Parallel()
 	requireSymlinkSupport(t)

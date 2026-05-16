@@ -19,6 +19,13 @@ func TestConfigureAppliesOptions(t *testing.T) {
 		assert func(t *testing.T, g *Generator)
 	}{
 		{
+			name:   "WithRunMode",
+			option: WithRunMode(RunModeStrict),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, RunModeStrict, g.runMode)
+			},
+		},
+		{
 			name:   "WithSeed",
 			option: WithSeed(123),
 			assert: func(t *testing.T, g *Generator) {
@@ -197,6 +204,11 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 		option      Option
 		errContains string
 	}{
+		{
+			name:        "InvalidRunMode",
+			option:      WithRunMode(RunMode(255)),
+			errContains: "run mode must be one of append, strict, replace",
+		},
 		{
 			name:        "NilOption",
 			option:      nil,

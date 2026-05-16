@@ -2,7 +2,6 @@ package randfiletree
 
 import (
 	"fmt"
-	"io/fs"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -16,7 +15,6 @@ const (
 // Generator denotes a filetree generator
 type Generator struct {
 	basePath string
-	lastPath string
 
 	dirNameGen    FileNameGenerator
 	dirNameLenGen FileNameLenGenerator
@@ -35,7 +33,8 @@ type Generator struct {
 	symlinkProbGen    BooleanGenerator
 	symlinkRelProbGen BooleanGenerator
 
-	rndSrc *rand.Rand
+	rndSrc  *rand.Rand
+	runMode RunMode
 }
 
 // New instantiates a new generator
@@ -44,7 +43,8 @@ func New(basePath string) *Generator {
 		basePath: basePath,
 
 		/* #nosec G404 */
-		rndSrc: rand.New(rand.NewSource(defaultSeed)),
+		rndSrc:  rand.New(rand.NewSource(defaultSeed)),
+		runMode: RunModeAppend,
 	}
 }
 
@@ -62,7 +62,16 @@ func (g *Generator) Run() error {
 		return err
 	}
 
-	return g.writeDir(g.basePath, 0)
+	plan, err := g.planRun()
+	if err != nil {
+		return err
+	}
+
+	if err := g.applyRunPlan(plan); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (g *Generator) hasNoConfiguration() bool {
@@ -122,6 +131,9 @@ func (g *Generator) validateRunConfiguration() error {
 	if g.symlinkRelProbGen == nil {
 		missing = append(missing, "relative symlink generator")
 	}
+	if err := validateRunMode(g.runMode); err != nil {
+		missing = append(missing, err.Error())
+	}
 
 	if len(missing) > 0 {
 		return fmt.Errorf("generator configuration incomplete, missing: %s", strings.Join(missing, ", "))
@@ -138,88 +150,6 @@ func (g *Generator) RemoveAll() error {
 // Walk performs a recursive walk through the provided directory (wrapping filepath.Walk())
 func (g *Generator) Walk(fn filepath.WalkFunc) error {
 	return filepath.Walk(g.basePath, fn)
-}
-
-func (g *Generator) writeDir(path string, depth int) error {
-
-	// Check for depth abort criterion
-	depth++
-	if depth > g.pathDepthGen(g.rndSrc) {
-		return nil
-	}
-
-	// Check if the directory already exists
-	if _, err := os.Stat(path); depth > 1 && err == nil {
-		return nil
-	}
-
-	// Create the directory
-	if err := os.MkdirAll(path, fs.FileMode(g.dirModeGen(g.rndSrc))); err != nil {
-		return err
-	}
-
-	// Create sub-directories, if any
-	for i := 0; i < g.nDirsInDirGen(g.rndSrc); i++ {
-		if err := g.writeDir(filepath.Join(path, g.dirNameGen(g.rndSrc, g.dirNameLenGen(g.rndSrc))), depth); err != nil {
-			return err
-		}
-	}
-
-	// Create files, if any
-	for i := 0; i < g.nFilesInDirGen(g.rndSrc); i++ {
-		if g.lastPath != "" && g.symlinkProbGen(g.rndSrc) {
-			if err := g.writeSymlinkInDir(path, g.lastPath); err != nil {
-				return err
-			}
-		} else {
-			createdPath, created, err := g.writeFileInDir(path)
-			if err != nil {
-				return err
-			}
-			if created && g.symlinkRelProbGen(g.rndSrc) {
-				if err := g.writeRelSymlink(path, createdPath); err != nil {
-					return err
-				}
-			}
-		}
-
-	}
-
-	return nil
-}
-
-func (g *Generator) writeFileInDir(dir string) (string, bool, error) {
-	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
-
-	// Check if the file already exists
-	if _, err := os.Lstat(path); err == nil {
-		return "", false, nil
-	}
-
-	mode := g.fileModeGen(g.rndSrc)
-	data, err := g.dataGen(g.rndSrc)
-	if err != nil {
-		return "", false, err
-	}
-
-	if err := os.WriteFile(path, data, fs.FileMode(mode)); err != nil {
-		return "", false, err
-	}
-
-	g.lastPath = path
-
-	return path, true, nil
-}
-
-func (g *Generator) writeSymlinkInDir(dir, target string) error {
-	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))
-
-	// Check if the link already exists
-	if _, err := os.Lstat(path); err == nil {
-		return nil
-	}
-
-	return os.Symlink(target, path)
 }
 
 func (g *Generator) writeRelSymlink(dir, target string) error {
