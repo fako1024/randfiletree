@@ -7,9 +7,13 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
-const maxPlanPathCollisionRetries = 128
+const (
+	maxPlanPathCollisionRetries = 128
+	defaultSymlinkCycleLength   = 2
+)
 
 var ErrPlanPathCollisionExhausted = errors.New("planned path collision retries exhausted")
 
@@ -19,6 +23,7 @@ const (
 	plannedEntryTypeDir plannedEntryType = iota + 1
 	plannedEntryTypeFile
 	plannedEntryTypeSymlink
+	plannedEntryTypeHardlink
 )
 
 type plannedEntry struct {
@@ -32,13 +37,26 @@ type plannedEntry struct {
 }
 
 type runPlan struct {
-	entries []plannedEntry
+	entries        []plannedEntry
+	hardlinkGroups []plannedHardlinkGroup
+}
+
+type plannedHardlinkGroup struct {
+	origin string
+	paths  []string
 }
 
 type planState struct {
 	rnd      *rand.Rand
 	used     map[string]struct{}
 	lastPath string
+
+	filePaths []string
+
+	symlinkPaths []string
+
+	hardlinkGroups      []*plannedHardlinkGroup
+	hardlinkGroupByPath map[string]*plannedHardlinkGroup
 }
 
 func (g *Generator) planRun() (runPlan, error) {
@@ -47,12 +65,15 @@ func (g *Generator) planRun() (runPlan, error) {
 		used: map[string]struct{}{
 			g.basePath: {},
 		},
+		hardlinkGroupByPath: make(map[string]*plannedHardlinkGroup),
 	}
 
 	plan := runPlan{entries: make([]plannedEntry, 0, 16)}
 	if err := g.planDir(g.basePath, 0, &state, &plan); err != nil {
 		return runPlan{}, err
 	}
+
+	plan.hardlinkGroups = state.materializeHardlinkGroups()
 
 	return plan, nil
 }
@@ -83,44 +104,229 @@ func (g *Generator) planDir(path string, depth int, state *planState, plan *runP
 
 	nFiles := g.nFilesInDirGen(state.rnd)
 	for i := 0; i < nFiles; i++ {
-		if state.lastPath != "" && g.symlinkProbGen(state.rnd) {
-			if err := g.planSymlink(path, state.lastPath, state, plan); err != nil {
-				return err
-			}
-
+		plannedSymlink, err := g.tryPlanSymlink(path, state, plan)
+		if err != nil {
+			return err
+		}
+		if plannedSymlink {
 			continue
 		}
 
-		filePath, err := g.planUniquePath(path, state, g.fileNameGen, g.fileNameLenGen, "file")
+		plannedHardlink, err := g.tryPlanHardlink(path, state, plan)
+		if err != nil {
+			return err
+		}
+		if plannedHardlink {
+			continue
+		}
+
+		if err := g.planFile(path, state, plan); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (g *Generator) tryPlanSymlink(dir string, state *planState, plan *runPlan) (bool, error) {
+	if !g.symlinkProbGen(state.rnd) {
+		return false, nil
+	}
+
+	if g.hasExplicitSymlinkStrategy() {
+		strategy := g.nextSymlinkStrategy(state.rnd)
+		if err := validateSymlinkStrategy(strategy); err != nil {
+			return false, fmt.Errorf("invalid configured symlink strategy: %w", err)
+		}
+
+		return g.planSymlinkStrategy(dir, strategy, state, plan)
+	}
+
+	if state.lastPath == "" {
+		return false, nil
+	}
+
+	if err := g.planSymlink(dir, state.lastPath, state, plan); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (g *Generator) planSymlinkStrategy(
+	dir string,
+	strategy SymlinkStrategy,
+	state *planState,
+	plan *runPlan,
+) (bool, error) {
+	switch strategy {
+	case SymlinkStrategyAbsolute:
+		targetPath, ok := state.pickFilePath(state.rnd)
+		if !ok {
+			return false, nil
+		}
+
+		if err := g.planSymlink(dir, targetPath, state, plan); err != nil {
+			return false, err
+		}
+
+		return true, nil
+
+	case SymlinkStrategyRelative:
+		targetPath, ok := state.pickFilePath(state.rnd)
+		if !ok {
+			return false, nil
+		}
+
+		relTarget, err := filepath.Rel(dir, targetPath)
+		if err != nil {
+			return false, fmt.Errorf("failed to derive relative symlink target for `%s`: %w", targetPath, err)
+		}
+
+		if err := g.planSymlink(dir, relTarget, state, plan); err != nil {
+			return false, err
+		}
+
+		return true, nil
+
+	case SymlinkStrategyDangling:
+		danglingTarget, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "dangling symlink target")
+		if err != nil {
+			return false, err
+		}
+
+		if err := g.planSymlink(dir, danglingTarget, state, plan); err != nil {
+			return false, err
+		}
+
+		return true, nil
+
+	case SymlinkStrategySelfReferential:
+		symlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "self-referential symlink")
+		if err != nil {
+			return false, err
+		}
+
+		g.appendSymlink(plan, state, symlinkPath, filepath.Base(symlinkPath))
+
+		return true, nil
+
+	case SymlinkStrategyChained:
+		chainedTarget, ok := state.pickSymlinkPath(state.rnd)
+		if !ok {
+			return false, nil
+		}
+
+		if err := g.planSymlink(dir, chainedTarget, state, plan); err != nil {
+			return false, err
+		}
+
+		return true, nil
+
+	case SymlinkStrategyCycle:
+		if err := g.planSymlinkCycle(dir, defaultSymlinkCycleLength, state, plan); err != nil {
+			return false, err
+		}
+
+		return true, nil
+
+	default:
+		return false, fmt.Errorf("unsupported symlink strategy %d", strategy)
+	}
+}
+
+func (g *Generator) planSymlinkCycle(dir string, length int, state *planState, plan *runPlan) error {
+	if length < 2 {
+		return fmt.Errorf("symlink cycle length must be >= 2, got %d", length)
+	}
+
+	cyclePaths := make([]string, 0, length)
+	for i := 0; i < length; i++ {
+		symlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "symlink cycle")
 		if err != nil {
 			return err
 		}
 
-		data, err := g.dataGen(state.rnd)
+		cyclePaths = append(cyclePaths, symlinkPath)
+	}
+
+	for i := range cyclePaths {
+		path := cyclePaths[i]
+		next := cyclePaths[(i+1)%len(cyclePaths)]
+
+		relTarget, err := filepath.Rel(filepath.Dir(path), next)
 		if err != nil {
-			return fmt.Errorf("failed to generate file data for `%s`: %w", filePath, err)
+			return fmt.Errorf("failed to derive cycle symlink target for `%s`: %w", path, err)
 		}
 
-		plan.entries = append(plan.entries, plannedEntry{
-			typeID: plannedEntryTypeFile,
-			path:   filePath,
-			mode:   fs.FileMode(g.fileModeGen(state.rnd)),
-			data:   data,
-		})
-		state.lastPath = filePath
+		g.appendSymlink(plan, state, path, relTarget)
+	}
 
-		if !g.symlinkRelProbGen(state.rnd) {
-			continue
-		}
+	return nil
+}
 
-		relTarget, err := filepath.Rel(path, filePath)
-		if err != nil {
-			return fmt.Errorf("failed to derive relative symlink target for `%s`: %w", filePath, err)
-		}
+func (g *Generator) tryPlanHardlink(dir string, state *planState, plan *runPlan) (bool, error) {
+	if !g.shouldPlanHardlink(state.rnd) {
+		return false, nil
+	}
 
-		if err := g.planSymlink(path, relTarget, state, plan); err != nil {
-			return err
-		}
+	targetPath, ok := state.pickFilePath(state.rnd)
+	if !ok {
+		return false, nil
+	}
+
+	hardlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "hardlink")
+	if err != nil {
+		return false, err
+	}
+
+	plan.entries = append(plan.entries, plannedEntry{
+		typeID:     plannedEntryTypeHardlink,
+		path:       hardlinkPath,
+		linkTarget: targetPath,
+	})
+
+	state.registerFilePath(hardlinkPath)
+	state.lastPath = hardlinkPath
+	state.registerHardlink(targetPath, hardlinkPath)
+
+	return true, nil
+}
+
+func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error {
+	filePath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "file")
+	if err != nil {
+		return err
+	}
+
+	data, err := g.dataGen(state.rnd)
+	if err != nil {
+		return fmt.Errorf("failed to generate file data for `%s`: %w", filePath, err)
+	}
+
+	plan.entries = append(plan.entries, plannedEntry{
+		typeID: plannedEntryTypeFile,
+		path:   filePath,
+		mode:   fs.FileMode(g.fileModeGen(state.rnd)),
+		data:   data,
+	})
+	state.registerFilePath(filePath)
+	state.lastPath = filePath
+
+	if g.hasExplicitSymlinkStrategy() {
+		return nil
+	}
+	if g.symlinkRelProbGen == nil || !g.symlinkRelProbGen(state.rnd) {
+		return nil
+	}
+
+	relTarget, err := filepath.Rel(dir, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to derive relative symlink target for `%s`: %w", filePath, err)
+	}
+
+	if err := g.planSymlink(dir, relTarget, state, plan); err != nil {
+		return err
 	}
 
 	return nil
@@ -132,13 +338,18 @@ func (g *Generator) planSymlink(dir, target string, state *planState, plan *runP
 		return err
 	}
 
-	plan.entries = append(plan.entries, plannedEntry{
-		typeID:     plannedEntryTypeSymlink,
-		path:       symlinkPath,
-		linkTarget: target,
-	})
+	g.appendSymlink(plan, state, symlinkPath, target)
 
 	return nil
+}
+
+func (g *Generator) appendSymlink(plan *runPlan, state *planState, path, target string) {
+	plan.entries = append(plan.entries, plannedEntry{
+		typeID:     plannedEntryTypeSymlink,
+		path:       path,
+		linkTarget: target,
+	})
+	state.registerSymlinkPath(path)
 }
 
 func (g *Generator) planUniquePath(
@@ -166,6 +377,68 @@ func (g *Generator) planUniquePath(
 		dir,
 		maxPlanPathCollisionRetries,
 	)
+}
+
+func (state *planState) registerFilePath(path string) {
+	state.filePaths = append(state.filePaths, path)
+}
+
+func (state *planState) registerSymlinkPath(path string) {
+	state.symlinkPaths = append(state.symlinkPaths, path)
+}
+
+func (state *planState) pickFilePath(r *rand.Rand) (string, bool) {
+	if len(state.filePaths) == 0 {
+		return "", false
+	}
+
+	return state.filePaths[r.Intn(len(state.filePaths))], true
+}
+
+func (state *planState) pickSymlinkPath(r *rand.Rand) (string, bool) {
+	if len(state.symlinkPaths) == 0 {
+		return "", false
+	}
+
+	return state.symlinkPaths[r.Intn(len(state.symlinkPaths))], true
+}
+
+func (state *planState) registerHardlink(targetPath, hardlinkPath string) {
+	group := state.hardlinkGroupByPath[targetPath]
+	if group == nil {
+		group = &plannedHardlinkGroup{
+			origin: targetPath,
+			paths:  []string{targetPath},
+		}
+		state.hardlinkGroups = append(state.hardlinkGroups, group)
+		state.hardlinkGroupByPath[targetPath] = group
+	}
+
+	group.paths = append(group.paths, hardlinkPath)
+	state.hardlinkGroupByPath[hardlinkPath] = group
+}
+
+func (state *planState) materializeHardlinkGroups() []plannedHardlinkGroup {
+	if len(state.hardlinkGroups) == 0 {
+		return nil
+	}
+
+	groups := make([]plannedHardlinkGroup, 0, len(state.hardlinkGroups))
+	for _, group := range state.hardlinkGroups {
+		paths := append([]string(nil), group.paths...)
+		sort.Strings(paths)
+
+		groups = append(groups, plannedHardlinkGroup{
+			origin: group.origin,
+			paths:  paths,
+		})
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].origin < groups[j].origin
+	})
+
+	return groups
 }
 
 func (g *Generator) applyRunPlan(plan runPlan) error {
@@ -215,6 +488,10 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) error {
 			if info.Mode()&os.ModeSymlink == 0 {
 				return fmt.Errorf("planned symlink path `%s` already exists as non-symlink", entry.path)
 			}
+		case plannedEntryTypeHardlink:
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("planned hardlink path `%s` already exists as non-regular file", entry.path)
+			}
 		default:
 			return fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
 		}
@@ -237,6 +514,10 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) error {
 	case plannedEntryTypeSymlink:
 		if err := os.Symlink(entry.linkTarget, entry.path); err != nil {
 			return fmt.Errorf("failed to create planned symlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
+		}
+	case plannedEntryTypeHardlink:
+		if err := os.Link(entry.linkTarget, entry.path); err != nil {
+			return fmt.Errorf("failed to create planned hardlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
 		}
 	default:
 		return fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
