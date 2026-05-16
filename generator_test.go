@@ -1,9 +1,11 @@
 package randfiletree
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,6 +64,7 @@ func TestPlanRunDeterministicForSameSeedAndOptions(t *testing.T) {
 			WithPathDepthGenerator(NumberGeneratorConstant(2)),
 			WithSymlinkProbability(0),
 			WithRelativeSymlinkProbability(0),
+			WithHardlinkProbability(0),
 		))
 
 		return g
@@ -105,6 +108,7 @@ func TestRunReturnsDeterministicCollisionError(t *testing.T) {
 			WithPathDepthGenerator(NumberGeneratorConstant(1)),
 			WithSymlinkProbability(0),
 			WithRelativeSymlinkProbability(0),
+			WithHardlinkProbability(0),
 		))
 
 		return g
@@ -149,6 +153,7 @@ func TestRunModeAppendRecursesIntoExistingDirectory(t *testing.T) {
 		WithPathDepthGenerator(NumberGeneratorConstant(2)),
 		WithSymlinkProbability(0),
 		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
 	))
 
 	require.NoError(t, g.Run())
@@ -186,6 +191,7 @@ func TestRunModeStrictFailsOnExistingPath(t *testing.T) {
 		WithPathDepthGenerator(NumberGeneratorConstant(1)),
 		WithSymlinkProbability(0),
 		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
 	))
 
 	err := g.Run()
@@ -225,6 +231,7 @@ func TestRunModeReplaceClearsBasePathBeforeApply(t *testing.T) {
 		WithPathDepthGenerator(NumberGeneratorConstant(1)),
 		WithSymlinkProbability(0),
 		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
 	))
 
 	require.NoError(t, g.Run())
@@ -261,6 +268,7 @@ func TestRunDoesNotLeakLastPathAcrossRuns(t *testing.T) {
 		WithPathDepthGenerator(NumberGeneratorConstant(1)),
 		WithSymlinkProbability(0),
 		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
 	))
 	require.NoError(t, g.Run())
 
@@ -278,6 +286,7 @@ func TestRunDoesNotLeakLastPathAcrossRuns(t *testing.T) {
 		}),
 		WithRelativeSymlinkProbability(0),
 		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithHardlinkProbability(0),
 	))
 	require.NoError(t, g.Run())
 
@@ -332,6 +341,318 @@ func TestWriteRelSymlinkRejectsEmptyTarget(t *testing.T) {
 	require.ErrorContains(t, err, "empty symlink target")
 }
 
+func TestRunPlansAndAppliesHardlinks(t *testing.T) {
+	t.Parallel()
+	requireHardlinkSupport(t)
+
+	base := filepath.Join(t.TempDir(), "tree")
+	nameIdx := 0
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(11),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(4)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			name := fmt.Sprintf("n%02d", nameIdx)
+			nameIdx++
+			return name
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(1),
+	))
+
+	plan, err := g.planRun()
+	require.NoError(t, err)
+
+	nFiles := 0
+	nHardlinks := 0
+	for _, entry := range plan.entries {
+		switch entry.typeID {
+		case plannedEntryTypeFile:
+			nFiles++
+		case plannedEntryTypeHardlink:
+			nHardlinks++
+		}
+	}
+	require.Equal(t, 1, nFiles)
+	require.Equal(t, 3, nHardlinks)
+	require.Len(t, plan.hardlinkGroups, 1)
+	require.Len(t, plan.hardlinkGroups[0].paths, 4)
+
+	require.NoError(t, g.Run())
+
+	entries, err := os.ReadDir(base)
+	require.NoError(t, err)
+
+	regularFiles := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+			continue
+		}
+		regularFiles = append(regularFiles, filepath.Join(base, entry.Name()))
+	}
+	sort.Strings(regularFiles)
+	require.Len(t, regularFiles, 4)
+
+	firstInfo, err := os.Stat(regularFiles[0])
+	require.NoError(t, err)
+	secondInfo, err := os.Stat(regularFiles[1])
+	require.NoError(t, err)
+	require.True(t, os.SameFile(firstInfo, secondInfo))
+
+	require.NoError(t, os.WriteFile(regularFiles[0], []byte("updated"), 0o600))
+	updatedData, err := os.ReadFile(regularFiles[1])
+	require.NoError(t, err)
+	require.Equal(t, "updated", string(updatedData))
+}
+
+func TestRunSymlinkStrategyAbsolute(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := filepath.Join(t.TempDir(), "tree")
+	nameIdx := 0
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(7),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(2)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			name := fmt.Sprintf("n%02d", nameIdx)
+			nameIdx++
+			return name
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(1),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
+			return SymlinkStrategyAbsolute
+		}),
+	))
+
+	require.NoError(t, g.Run())
+
+	target, err := os.Readlink(filepath.Join(base, "n01"))
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(base, "n00"), target)
+}
+
+func TestRunSymlinkStrategyRelative(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := filepath.Join(t.TempDir(), "tree")
+	nameIdx := 0
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(7),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(2)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			name := fmt.Sprintf("n%02d", nameIdx)
+			nameIdx++
+			return name
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(1),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
+			return SymlinkStrategyRelative
+		}),
+	))
+
+	require.NoError(t, g.Run())
+
+	target, err := os.Readlink(filepath.Join(base, "n01"))
+	require.NoError(t, err)
+	require.Equal(t, "n00", target)
+}
+
+func TestRunSymlinkStrategyDangling(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := filepath.Join(t.TempDir(), "tree")
+	nameIdx := 0
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(7),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			name := fmt.Sprintf("n%02d", nameIdx)
+			nameIdx++
+			return name
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(1),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
+			return SymlinkStrategyDangling
+		}),
+	))
+
+	require.NoError(t, g.Run())
+
+	linkPath := filepath.Join(base, "n01")
+	target, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+
+	_, err = os.Stat(target)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestRunSymlinkStrategySelfReferential(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := filepath.Join(t.TempDir(), "tree")
+	nameIdx := 0
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(7),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			name := fmt.Sprintf("n%02d", nameIdx)
+			nameIdx++
+			return name
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(1),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
+			return SymlinkStrategySelfReferential
+		}),
+	))
+
+	require.NoError(t, g.Run())
+
+	target, err := os.Readlink(filepath.Join(base, "n00"))
+	require.NoError(t, err)
+	require.Equal(t, "n00", target)
+}
+
+func TestRunSymlinkStrategyCycleAndChained(t *testing.T) {
+	t.Parallel()
+	requireSymlinkSupport(t)
+
+	base := filepath.Join(t.TempDir(), "tree")
+	nameIdx := 0
+	strategyCall := 0
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(9),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string {
+			return "dir"
+		}),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(2)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			name := fmt.Sprintf("n%02d", nameIdx)
+			nameIdx++
+			return name
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(1),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
+			strategyCall++
+			if strategyCall == 1 {
+				return SymlinkStrategyCycle
+			}
+
+			return SymlinkStrategyChained
+		}),
+	))
+
+	require.NoError(t, g.Run())
+
+	targetN00, err := os.Readlink(filepath.Join(base, "n00"))
+	require.NoError(t, err)
+	require.Equal(t, "n01", targetN00)
+
+	targetN01, err := os.Readlink(filepath.Join(base, "n01"))
+	require.NoError(t, err)
+	require.Equal(t, "n00", targetN01)
+
+	targetN02, err := os.Readlink(filepath.Join(base, "n02"))
+	require.NoError(t, err)
+	require.Contains(t, []string{filepath.Join(base, "n00"), filepath.Join(base, "n01")}, targetN02)
+
+	nVisited := 0
+	require.NoError(t, g.Walk(func(path string, info os.FileInfo, err error) error {
+		require.NoError(t, err)
+		nVisited++
+		return nil
+	}))
+	require.Equal(t, 4, nVisited)
+}
+
 func requireSymlinkSupport(t *testing.T) {
 	t.Helper()
 
@@ -342,5 +663,18 @@ func requireSymlinkSupport(t *testing.T) {
 	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink not supported in this test environment: %s", err)
+	}
+}
+
+func requireHardlinkSupport(t *testing.T) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target.txt")
+	link := filepath.Join(tmpDir, "link.txt")
+
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("hardlink not supported in this test environment: %s", err)
 	}
 }

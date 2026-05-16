@@ -81,6 +81,54 @@ func TestDanglingSymlinkParity(t *testing.T) {
 	require.NoError(t, Paths(pathA, pathB))
 }
 
+func TestHardlinkTopologyParity(t *testing.T) {
+	t.Parallel()
+	requireHardlinkSupport(t)
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+
+	aTarget := filepath.Join(pathA, "target.txt")
+	bTarget := filepath.Join(pathB, "target.txt")
+	require.NoError(t, os.WriteFile(aTarget, []byte("shared-data"), 0o600))
+	require.NoError(t, os.WriteFile(bTarget, []byte("shared-data"), 0o600))
+
+	require.NoError(t, os.Link(aTarget, filepath.Join(pathA, "link1.txt")))
+	require.NoError(t, os.Link(aTarget, filepath.Join(pathA, "link2.txt")))
+	require.NoError(t, os.Link(bTarget, filepath.Join(pathB, "link1.txt")))
+	require.NoError(t, os.Link(bTarget, filepath.Join(pathB, "link2.txt")))
+
+	require.NoError(t, Paths(pathA, pathB))
+}
+
+func TestHardlinkTopologyMismatch(t *testing.T) {
+	t.Parallel()
+	requireHardlinkSupport(t)
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+
+	aTarget := filepath.Join(pathA, "target.txt")
+	bTarget := filepath.Join(pathB, "target.txt")
+	require.NoError(t, os.WriteFile(aTarget, []byte("shared-data"), 0o600))
+	require.NoError(t, os.WriteFile(bTarget, []byte("shared-data"), 0o600))
+
+	require.NoError(t, os.Link(aTarget, filepath.Join(pathA, "link.txt")))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "link.txt"), []byte("shared-data"), 0o600))
+
+	err := Paths(pathA, pathB)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "hardlink topology mismatch")
+}
+
 func requireSymlinkSupport(t *testing.T) {
 	t.Helper()
 
@@ -91,5 +139,18 @@ func requireSymlinkSupport(t *testing.T) {
 	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink not supported in this test environment: %s", err)
+	}
+}
+
+func requireHardlinkSupport(t *testing.T) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target.txt")
+	link := filepath.Join(tmpDir, "link.txt")
+
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("hardlink not supported in this test environment: %s", err)
 	}
 }

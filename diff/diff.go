@@ -29,6 +29,11 @@ type Node struct {
 	Hash []byte
 }
 
+type collectedPaths struct {
+	nodes          []Node
+	hardlinkGroups [][]string
+}
+
 func init() {
 	var err error
 	hashKey, err = hex.DecodeString("000102030405060708090A0B0C0D0E0FF0E0D0C0B0A090807060504030201000")
@@ -51,14 +56,20 @@ func Paths(a, b string) error {
 		return err
 	}
 
-	if diff := cmp.Diff(pathsA, pathsB, cmpopts.IgnoreUnexported()); diff != "" {
+	if diff := cmp.Diff(pathsA.nodes, pathsB.nodes, cmpopts.IgnoreUnexported()); diff != "" {
 		return fmt.Errorf("mismatch (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff(pathsA.hardlinkGroups, pathsB.hardlinkGroups); diff != "" {
+		return fmt.Errorf("hardlink topology mismatch (-want +got):\n%s", diff)
 	}
 
 	return nil
 }
 
-func buildPaths(basePath string) (nodes []Node, err error) {
+func buildPaths(basePath string) (result collectedPaths, err error) {
+	hardlinkPathsByKey := map[fileIdentity][]string{}
+
 	err = filepath.Walk(basePath, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return fmt.Errorf("failed to accecss path `%s`: %w", path, err)
@@ -84,8 +95,13 @@ func buildPaths(basePath string) (nodes []Node, err error) {
 			if err != nil {
 				return err
 			}
+
+			identity, identityOK := fileIdentityFromPath(path)
+			if identityOK {
+				hardlinkPathsByKey[identity] = append(hardlinkPathsByKey[identity], node.Path)
+			}
 		}
-		nodes = append(nodes, node)
+		result.nodes = append(result.nodes, node)
 
 		return nil
 	})
@@ -93,11 +109,36 @@ func buildPaths(basePath string) (nodes []Node, err error) {
 		return
 	}
 
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].Path < nodes[j].Path
+	sort.Slice(result.nodes, func(i, j int) bool {
+		return result.nodes[i].Path < result.nodes[j].Path
 	})
 
+	result.hardlinkGroups = buildHardlinkGroups(hardlinkPathsByKey)
+
 	return
+}
+
+func buildHardlinkGroups(pathsByIdentity map[fileIdentity][]string) [][]string {
+	groups := make([][]string, 0, len(pathsByIdentity))
+	for _, paths := range pathsByIdentity {
+		if len(paths) < 2 {
+			continue
+		}
+
+		group := append([]string(nil), paths...)
+		sort.Strings(group)
+		groups = append(groups, group)
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		if len(groups[i]) == 0 || len(groups[j]) == 0 {
+			return len(groups[i]) < len(groups[j])
+		}
+
+		return groups[i][0] < groups[j][0]
+	})
+
+	return groups
 }
 
 func hashFile(file string, hashKey []byte) ([]byte, error) {

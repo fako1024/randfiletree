@@ -193,6 +193,46 @@ func WithRelativeSymlinkGenerator(gen BooleanGenerator) Option {
 	}
 }
 
+// WithHardlinkGenerator sets the generator used to decide whether to create hardlinks.
+func WithHardlinkGenerator(gen BooleanGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateBooleanGenerator("hardlink generator", gen); err != nil {
+			return err
+		}
+		g.hardlinkProbGen = gen
+		return nil
+	}
+}
+
+// WithSymlinkStrategyGenerator sets the generator used to choose symlink target strategies.
+func WithSymlinkStrategyGenerator(gen SymlinkStrategyGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateSymlinkStrategyGenerator("symlink strategy generator", gen); err != nil {
+			return err
+		}
+		g.symlinkStrategyGen = gen
+		return nil
+	}
+}
+
+// WithSymlinkStrategyProbabilities sets weighted symlink strategy probabilities.
+func WithSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]float64) Option {
+	return func(g *Generator) error {
+		if err := validateSymlinkStrategyProbabilities(probabilities); err != nil {
+			return err
+		}
+
+		copyProbabilities := make(map[SymlinkStrategy]float64, len(probabilities))
+		for strategy, probability := range probabilities {
+			copyProbabilities[strategy] = probability
+		}
+
+		g.symlinkStrategyGen = SymlinkStrategyGeneratorProbabilityWeighted(copyProbabilities)
+
+		return nil
+	}
+}
+
 // WithSymlinkProbability sets a flat probability for symlink creation in the range [0, 1].
 func WithSymlinkProbability(probability float64) Option {
 	return func(g *Generator) error {
@@ -214,6 +254,19 @@ func WithRelativeSymlinkProbability(probability float64) Option {
 		}
 
 		g.symlinkRelProbGen = BooleanGeneratorProbabilityFlat(probability)
+
+		return nil
+	}
+}
+
+// WithHardlinkProbability sets a flat probability for hardlink creation in the range [0, 1].
+func WithHardlinkProbability(probability float64) Option {
+	return func(g *Generator) error {
+		if err := validateProbability("hardlink probability", probability); err != nil {
+			return err
+		}
+
+		g.hardlinkProbGen = BooleanGeneratorProbabilityFlat(probability)
 
 		return nil
 	}
@@ -346,6 +399,45 @@ func validateDataGenerator(name string, gen DataGenerator) error {
 func validateBooleanGenerator(name string, gen BooleanGenerator) error {
 	if gen == nil {
 		return fmt.Errorf("%s must not be nil", name)
+	}
+
+	return nil
+}
+
+func validateSymlinkStrategyGenerator(name string, gen SymlinkStrategyGenerator) error {
+	if gen == nil {
+		return fmt.Errorf("%s must not be nil", name)
+	}
+
+	return nil
+}
+
+func validateSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]float64) error {
+	if len(probabilities) == 0 {
+		return fmt.Errorf("symlink strategy probabilities must not be empty")
+	}
+
+	total := 0.0
+	for strategy, probability := range probabilities {
+		if err := validateSymlinkStrategy(strategy); err != nil {
+			return err
+		}
+
+		if math.IsNaN(probability) {
+			return fmt.Errorf("symlink strategy probability for %s must not be NaN", strategy)
+		}
+		if math.IsInf(probability, 0) {
+			return fmt.Errorf("symlink strategy probability for %s must be finite", strategy)
+		}
+		if probability < 0 {
+			return fmt.Errorf("symlink strategy probability for %s must be >= 0, got %v", strategy, probability)
+		}
+
+		total += probability
+	}
+
+	if total <= 0 {
+		return fmt.Errorf("sum of symlink strategy probabilities must be > 0")
 	}
 
 	return nil
