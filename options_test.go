@@ -370,9 +370,18 @@ func TestNewWithOptions(t *testing.T) {
 		path := t.TempDir()
 		g, err := NewWithOptions(
 			path,
+			WithDirNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+			WithDirNameLengthGenerator(NumberGeneratorConstant(8)),
+			WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
 			WithPathDepthGenerator(NumberGeneratorConstant(1)),
 			WithFilesPerDirectoryGenerator(NumberGeneratorConstant(0)),
 			WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+			WithFileNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+			WithFileNameLengthGenerator(NumberGeneratorConstant(8)),
+			WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+			WithDataGenerator(DataGeneratorFixedString("")),
+			WithSymlinkGenerator(func(r *rand.Rand) bool { return false }),
+			WithRelativeSymlinkGenerator(func(r *rand.Rand) bool { return false }),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, g)

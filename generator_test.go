@@ -1,7 +1,6 @@
 package randfiletree
 
 import (
-	"io/fs"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -18,20 +17,27 @@ func TestDefaultOptions(t *testing.T) {
 	g := New(path)
 	require.NoError(t, g.RemoveAll())
 	require.NoError(t, g.Run())
-	n1 := 0
-	require.NoError(t, g.Walk(func(path string, info fs.FileInfo, err error) error {
-		n1++
-		return nil
-	}))
+	_, err := os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
 
 	require.NoError(t, g.Run())
-	n2 := 0
-	require.NoError(t, g.Walk(func(path string, info fs.FileInfo, err error) error {
-		n2++
-		return nil
-	}))
+	_, err = os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
 
-	require.Greater(t, n2, n1)
+func TestRunRejectsIncompleteConfigurationWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	g := New(t.TempDir())
+	require.NoError(t, g.Configure(WithPathDepthGenerator(NumberGeneratorConstant(1))))
+
+	var err error
+	require.NotPanics(t, func() {
+		err = g.Run()
+	})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "generator configuration incomplete")
+	require.ErrorContains(t, err, "directory name generator")
 }
 
 func TestWriteRelSymlinkUsesDirectoryRelativeTarget(t *testing.T) {
@@ -46,9 +52,12 @@ func TestWriteRelSymlinkUsesDirectoryRelativeTarget(t *testing.T) {
 	require.NoError(t, os.WriteFile(target, []byte("content"), 0o600))
 
 	g := New(base)
-	g.fileNameGen = func(rnd *rand.Rand, length int) string {
-		return "rel_link"
-	}
+	require.NoError(t, g.Configure(
+		WithFileNameGenerator(func(rnd *rand.Rand, length int) string {
+			return "rel_link"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(8)),
+	))
 
 	require.NoError(t, g.writeRelSymlink(dir, target))
 
