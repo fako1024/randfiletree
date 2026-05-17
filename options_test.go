@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -107,6 +108,44 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			option: WithPathDepthGenerator(NumberGeneratorConstant(4)),
 			assert: func(t *testing.T, g *Generator) {
 				require.Equal(t, 4, g.pathDepthGen(g.rndSrc))
+			},
+		},
+		{
+			name:   "WithOwnershipGenerators",
+			option: WithOwnershipGenerators(NumberGeneratorConstant(101), NumberGeneratorConstant(202)),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 101, g.ownershipUIDGen(g.rndSrc))
+				require.Equal(t, 202, g.ownershipGIDGen(g.rndSrc))
+			},
+		},
+		{
+			name:   "WithOwnership",
+			option: WithOwnership(303, 404),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 303, g.ownershipUIDGen(g.rndSrc))
+				require.Equal(t, 404, g.ownershipGIDGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithTimestampGenerators",
+			option: WithTimestampGenerators(
+				TimestampGeneratorConstant(time.Unix(1_700_000_000, 123)),
+				TimestampGeneratorConstant(time.Unix(1_700_000_001, 456)),
+			),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, time.Unix(1_700_000_000, 123), g.atimeGen(g.rndSrc))
+				require.Equal(t, time.Unix(1_700_000_001, 456), g.mtimeGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithTimestamps",
+			option: WithTimestamps(
+				time.Unix(1_700_000_010, 111),
+				time.Unix(1_700_000_020, 222),
+			),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, time.Unix(1_700_000_010, 111), g.atimeGen(g.rndSrc))
+				require.Equal(t, time.Unix(1_700_000_020, 222), g.mtimeGen(g.rndSrc))
 			},
 		},
 		{
@@ -301,6 +340,36 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			name:        "NilPathDepthGenerator",
 			option:      WithPathDepthGenerator(nil),
 			errContains: "path depth generator must not be nil",
+		},
+		{
+			name:        "NilOwnershipUIDGenerator",
+			option:      WithOwnershipGenerators(nil, NumberGeneratorConstant(1)),
+			errContains: "ownership uid generator must not be nil",
+		},
+		{
+			name:        "NilOwnershipGIDGenerator",
+			option:      WithOwnershipGenerators(NumberGeneratorConstant(1), nil),
+			errContains: "ownership gid generator must not be nil",
+		},
+		{
+			name:        "NegativeOwnershipUID",
+			option:      WithOwnership(-1, 1),
+			errContains: "ownership uid must be >= 0",
+		},
+		{
+			name:        "NegativeOwnershipGID",
+			option:      WithOwnership(1, -1),
+			errContains: "ownership gid must be >= 0",
+		},
+		{
+			name:        "NilAtimeGenerator",
+			option:      WithTimestampGenerators(nil, TimestampGeneratorConstant(time.Unix(1, 1))),
+			errContains: "atime generator must not be nil",
+		},
+		{
+			name:        "NilMtimeGenerator",
+			option:      WithTimestampGenerators(TimestampGeneratorConstant(time.Unix(1, 1)), nil),
+			errContains: "mtime generator must not be nil",
 		},
 		{
 			name:        "NilSymlinkGenerator",

@@ -30,6 +30,12 @@ type Generator struct {
 	dataGen      DataGenerator
 	pathDepthGen NumberGenerator
 
+	ownershipUIDGen NumberGenerator
+	ownershipGIDGen NumberGenerator
+
+	atimeGen TimestampGenerator
+	mtimeGen TimestampGenerator
+
 	symlinkProbGen    BooleanGenerator
 	symlinkRelProbGen BooleanGenerator
 	hardlinkProbGen   BooleanGenerator
@@ -106,6 +112,10 @@ func (g *Generator) hasNoConfiguration() bool {
 		g.fileModeGen == nil &&
 		g.dataGen == nil &&
 		g.pathDepthGen == nil &&
+		g.ownershipUIDGen == nil &&
+		g.ownershipGIDGen == nil &&
+		g.atimeGen == nil &&
+		g.mtimeGen == nil &&
 		g.symlinkProbGen == nil &&
 		g.symlinkRelProbGen == nil &&
 		g.hardlinkProbGen == nil &&
@@ -113,7 +123,7 @@ func (g *Generator) hasNoConfiguration() bool {
 }
 
 func (g *Generator) validateRunConfiguration() error {
-	missing := make([]string, 0, 15)
+	missing := make([]string, 0, 17)
 
 	if g.rndSrc == nil {
 		missing = append(missing, "random source")
@@ -147,6 +157,12 @@ func (g *Generator) validateRunConfiguration() error {
 	}
 	if g.pathDepthGen == nil {
 		missing = append(missing, "path depth generator")
+	}
+	if (g.ownershipUIDGen == nil) != (g.ownershipGIDGen == nil) {
+		missing = append(missing, ErrOwnershipMetadataConfigurationIncomplete.Error())
+	}
+	if (g.atimeGen == nil) != (g.mtimeGen == nil) {
+		missing = append(missing, ErrTimestampMetadataConfigurationIncomplete.Error())
 	}
 	if g.symlinkProbGen == nil {
 		missing = append(missing, "symlink generator")

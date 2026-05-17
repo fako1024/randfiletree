@@ -225,6 +225,95 @@ func TestPathsWithOptionsOwnershipToggle(t *testing.T) {
 	require.ErrorContains(t, err, "ownership comparison requested but metadata unavailable")
 }
 
+func TestPathsWithOptionsAccessTimeAvailability(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "file.txt"), []byte("same"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "file.txt"), []byte("same"), 0o600))
+
+	opts := DefaultOptions()
+	opts.CompareAccessTime = true
+
+	err := PathsWithOptions(pathA, pathB, opts)
+	if runtime.GOOS == "linux" {
+		require.NoError(t, err)
+		return
+	}
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "access-time comparison requested but metadata unavailable")
+}
+
+func TestPathsWithOptionsAccessTimeToggle(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != "linux" {
+		t.Skip("access time metadata toggle is Linux-specific")
+	}
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+
+	fileA := filepath.Join(pathA, "file.txt")
+	fileB := filepath.Join(pathB, "file.txt")
+	require.NoError(t, os.WriteFile(fileA, []byte("same"), 0o600))
+	require.NoError(t, os.WriteFile(fileB, []byte("same"), 0o600))
+
+	mtime := time.Unix(1_700_000_000, 123_000_000)
+	atimeA := time.Unix(1_700_000_100, 111)
+	atimeB := time.Unix(1_700_000_100, 999)
+	require.NoError(t, os.Chtimes(fileA, atimeA, mtime))
+	require.NoError(t, os.Chtimes(fileB, atimeB, mtime))
+
+	collectOpts := DefaultOptions()
+	collectOpts.CompareContentHash = false
+
+	collectedA, err := collectPaths(pathA, collectOpts)
+	require.NoError(t, err)
+	collectedB, err := collectPaths(pathB, collectOpts)
+	require.NoError(t, err)
+
+	nodeA, ok := findNodeByPath(collectedA.nodes, "/file.txt")
+	require.True(t, ok)
+	nodeB, ok := findNodeByPath(collectedB.nodes, "/file.txt")
+	require.True(t, ok)
+	if nodeA.AtimeNsec == nodeB.AtimeNsec {
+		t.Skip("filesystem does not preserve nanosecond atime differences")
+	}
+
+	optsNoAccessTime := DefaultOptions()
+	optsNoAccessTime.TimestampPrecision = TimestampPrecisionNanoseconds
+	optsNoAccessTime.CompareContentHash = false
+	optsNoAccessTime.CompareAccessTime = false
+	require.NoError(t, PathsWithOptions(pathA, pathB, optsNoAccessTime))
+
+	optsAccessTime := DefaultOptions()
+	optsAccessTime.TimestampPrecision = TimestampPrecisionNanoseconds
+	optsAccessTime.CompareContentHash = false
+	optsAccessTime.CompareAccessTime = true
+	err = PathsWithOptions(pathA, pathB, optsAccessTime)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "mismatch (-want +got)")
+}
+
+func TestStrictLinuxOptionsProfile(t *testing.T) {
+	t.Parallel()
+
+	opts := StrictLinuxOptions()
+	require.Equal(t, TimestampPrecisionNanoseconds, opts.TimestampPrecision)
+	require.True(t, opts.CompareOwnership)
+	require.True(t, opts.CompareAccessTime)
+}
+
 func TestPathsWithOptionsHardlinkTopologyToggle(t *testing.T) {
 	t.Parallel()
 	requireHardlinkSupport(t)
@@ -404,4 +493,14 @@ func requireHardlinkSupport(t *testing.T) {
 	if err := os.Link(target, link); err != nil {
 		t.Skipf("hardlink not supported in this test environment: %s", err)
 	}
+}
+
+func findNodeByPath(nodes []Node, path string) (Node, bool) {
+	for _, node := range nodes {
+		if node.Path == path {
+			return node, true
+		}
+	}
+
+	return Node{}, false
 }
