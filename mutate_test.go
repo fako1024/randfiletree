@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/fako1024/randfiletree/diff"
 	"github.com/stretchr/testify/require"
@@ -465,6 +466,68 @@ func TestApplyOperationsReportsReplaySpecOnFailure(t *testing.T) {
 	}, parsed)
 }
 
+func TestApplyOperationsRejectsSymlinkBasePath(t *testing.T) {
+	t.Parallel()
+	requireMutationSymlinkSupport(t)
+
+	root := t.TempDir()
+	baseTarget := filepath.Join(root, "base-target")
+	baseLink := filepath.Join(root, "base-link")
+
+	require.NoError(t, os.MkdirAll(baseTarget, 0o750))
+	require.NoError(t, os.Symlink(baseTarget, baseLink))
+
+	err := ApplyOperations(baseLink, []Operation{{
+		Kind: OperationKindCreateFile,
+		Path: "/inside.txt",
+		Mode: 0o600,
+		Data: []byte("data"),
+	}})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBasePathSymlink)
+}
+
+func TestApplyOperationsRejectsSymlinkParentEscape(t *testing.T) {
+	t.Parallel()
+	requireMutationSymlinkSupport(t)
+
+	base := t.TempDir()
+	outside := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "safe"), 0o750))
+	require.NoError(t, os.Symlink(outside, filepath.Join(base, "safe", "escape")))
+
+	err := ApplyOperations(base, []Operation{{
+		Kind: OperationKindCreateFile,
+		Path: "/safe/escape/leak.txt",
+		Mode: 0o600,
+		Data: []byte("data"),
+	}})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrOperationPathSymlinkParent)
+
+	_, statErr := os.Stat(filepath.Join(outside, "leak.txt"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestMutationSentinelErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseOperationSpec("  ")
+	require.ErrorIs(t, err, ErrOperationSpecEmpty)
+
+	_, err = GenerateOperations("", DefaultOperationGenerationOptions())
+	require.ErrorIs(t, err, ErrBasePathEmpty)
+
+	err = ApplyOperations("", []Operation{{
+		Kind: OperationKindCreateFile,
+		Path: "/ignored.txt",
+		Mode: 0o600,
+		Data: []byte("data"),
+	}})
+	require.ErrorIs(t, err, ErrBasePathEmpty)
+}
+
 func TestGenerateOperationsDeterministicForSameSeed(t *testing.T) {
 	t.Parallel()
 
@@ -527,6 +590,11 @@ func TestGenerateAndApplyOperationsIntegrationWithDiff(t *testing.T) {
 
 	require.NoError(t, ApplyOperations(left, ops))
 	require.NoError(t, ApplyOperations(right, ops))
+
+	fixedTime := time.Unix(1_700_000_000, 0)
+	require.NoError(t, normalizeTreeMTime(left, fixedTime))
+	require.NoError(t, normalizeTreeMTime(right, fixedTime))
+
 	require.NoError(t, diff.PathsWithOptions(left, right, diff.DefaultOptions()))
 }
 
@@ -559,12 +627,10 @@ func TestGeneratorMutationNilReceiver(t *testing.T) {
 
 	var g *Generator
 	_, err := g.GenerateOperations(DefaultOperationGenerationOptions())
-	require.Error(t, err)
-	require.ErrorContains(t, err, "nil generator")
+	require.ErrorIs(t, err, ErrNilGenerator)
 
 	err = g.ApplyOperations(nil)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "nil generator")
+	require.ErrorIs(t, err, ErrNilGenerator)
 }
 
 func requireMutationSymlinkSupport(t *testing.T) {
@@ -578,6 +644,20 @@ func requireMutationSymlinkSupport(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink not supported in this test environment: %s", err)
 	}
+}
+
+func normalizeTreeMTime(basePath string, ts time.Time) error {
+	return filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+
+		return os.Chtimes(path, ts, ts)
+	})
 }
 
 func requireMutationHardlinkSupport(t *testing.T) {

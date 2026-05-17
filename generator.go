@@ -54,7 +54,7 @@ func New(basePath string) *Generator {
 // Run generates a new tree (or adds to an existing one) according to the defined rules
 func (g *Generator) Run() error {
 	if g == nil {
-		return fmt.Errorf("nil generator")
+		return ErrNilGenerator
 	}
 
 	if g.hasNoConfiguration() {
@@ -80,7 +80,7 @@ func (g *Generator) Run() error {
 // GenerateOperations creates a deterministic operation stream against the generator base path.
 func (g *Generator) GenerateOperations(opts OperationGenerationOptions) ([]Operation, error) {
 	if g == nil {
-		return nil, fmt.Errorf("nil generator")
+		return nil, ErrNilGenerator
 	}
 
 	return GenerateOperations(g.basePath, opts)
@@ -89,7 +89,7 @@ func (g *Generator) GenerateOperations(opts OperationGenerationOptions) ([]Opera
 // ApplyOperations applies operation streams against the generator base path.
 func (g *Generator) ApplyOperations(ops []Operation) error {
 	if g == nil {
-		return fmt.Errorf("nil generator")
+		return ErrNilGenerator
 	}
 
 	return ApplyOperations(g.basePath, ops)
@@ -201,7 +201,7 @@ func (g *Generator) Walk(fn filepath.WalkFunc) error {
 
 func (g *Generator) writeRelSymlink(dir, target string) error {
 	if target == "" {
-		return fmt.Errorf("empty symlink target")
+		return ErrEmptySymlinkTarget
 	}
 
 	path := filepath.Join(dir, g.fileNameGen(g.rndSrc, g.fileNameLenGen(g.rndSrc)))

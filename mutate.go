@@ -21,6 +21,11 @@ const (
 
 var (
 	ErrMutationPathCollisionExhausted = errors.New("mutation path collision retries exhausted")
+	ErrBasePathEmpty                  = errors.New("base path must not be empty")
+	ErrBasePathSymlink                = errors.New("base path must not be a symlink")
+	ErrOperationSpecEmpty             = errors.New("operation spec must not be empty")
+	ErrOperationPathEscapesBase       = errors.New("operation path escapes base path")
+	ErrOperationPathSymlinkParent     = errors.New("operation path uses symlink parent")
 	errOperationPreconditions         = errors.New("operation preconditions not met")
 )
 
@@ -62,7 +67,7 @@ func (e *OperationApplyError) Unwrap() error {
 // ParseOperationSpec parses exported operation specs.
 func ParseOperationSpec(spec string) ([]Operation, error) {
 	if strings.TrimSpace(spec) == "" {
-		return nil, fmt.Errorf("operation spec must not be empty")
+		return nil, ErrOperationSpecEmpty
 	}
 
 	var parsed operationSpec
@@ -90,7 +95,7 @@ func ParseOperationSpec(spec string) ([]Operation, error) {
 // GenerateOperations creates a deterministic operation stream from a baseline path.
 func GenerateOperations(basePath string, opts OperationGenerationOptions) ([]Operation, error) {
 	if strings.TrimSpace(basePath) == "" {
-		return nil, fmt.Errorf("base path must not be empty")
+		return nil, ErrBasePathEmpty
 	}
 	if err := opts.validate(); err != nil {
 		return nil, err
@@ -129,15 +134,18 @@ func GenerateOperations(basePath string, opts OperationGenerationOptions) ([]Ope
 // ApplyOperations executes operations in strict order and fails fast.
 func ApplyOperations(basePath string, ops []Operation) error {
 	if strings.TrimSpace(basePath) == "" {
-		return fmt.Errorf("base path must not be empty")
+		return ErrBasePathEmpty
 	}
 	if len(ops) == 0 {
 		return nil
 	}
 
-	baseInfo, err := os.Stat(basePath)
+	baseInfo, err := os.Lstat(basePath)
 	if err != nil {
 		return fmt.Errorf("failed to inspect base path `%s`: %w", basePath, err)
+	}
+	if baseInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("base path `%s`: %w", basePath, ErrBasePathSymlink)
 	}
 	if !baseInfo.IsDir() {
 		return fmt.Errorf("base path `%s` is not a directory", basePath)
@@ -790,7 +798,13 @@ func randomDirMode(r *rand.Rand) uint32 {
 }
 
 func applyOperation(basePath string, op Operation) error {
-	path := operationPathToFS(basePath, op.Path)
+	path, err := operationPathToFS(basePath, op.Path)
+	if err != nil {
+		return fmt.Errorf("invalid operation path `%s`: %w", op.Path, err)
+	}
+	if err := ensureNoSymlinkParents(basePath, path); err != nil {
+		return fmt.Errorf("operation path `%s`: %w", op.Path, err)
+	}
 
 	switch op.Kind {
 	case OperationKindCreateFile:
@@ -836,7 +850,13 @@ func applyOperation(basePath string, op Operation) error {
 		}
 
 	case OperationKindCreateHardlink:
-		source := operationPathToFS(basePath, op.SourcePath)
+		source, err := operationPathToFS(basePath, op.SourcePath)
+		if err != nil {
+			return fmt.Errorf("invalid hardlink source path `%s`: %w", op.SourcePath, err)
+		}
+		if err := ensureNoSymlinkParents(basePath, source); err != nil {
+			return fmt.Errorf("hardlink source path `%s`: %w", op.SourcePath, err)
+		}
 		if err := ensureParentDirectory(path); err != nil {
 			return fmt.Errorf("create-hardlink parent check failed for `%s`: %w", op.Path, err)
 		}
@@ -876,7 +896,13 @@ func applyOperation(basePath string, op Operation) error {
 		}
 
 	case OperationKindRename:
-		destination := operationPathToFS(basePath, op.Destination)
+		destination, err := operationPathToFS(basePath, op.Destination)
+		if err != nil {
+			return fmt.Errorf("invalid rename destination path `%s`: %w", op.Destination, err)
+		}
+		if err := ensureNoSymlinkParents(basePath, destination); err != nil {
+			return fmt.Errorf("rename destination path `%s`: %w", op.Destination, err)
+		}
 		sourceInfo, err := os.Lstat(path)
 		if err != nil {
 			return fmt.Errorf("failed to inspect rename source `%s`: %w", op.Path, err)
@@ -985,14 +1011,85 @@ func applyOperation(basePath string, op Operation) error {
 	return nil
 }
 
-func operationPathToFS(basePath, opPath string) string {
+func operationPathToFS(basePath, opPath string) (string, error) {
+	cleanBase := filepath.Clean(basePath)
+
 	if opPath == "/" {
-		return filepath.Clean(basePath)
+		return cleanBase, nil
 	}
 
 	relPath := strings.TrimPrefix(opPath, "/")
+	if relPath == "" {
+		return "", fmt.Errorf("%w: empty relative path", ErrOperationPathEscapesBase)
+	}
 
-	return filepath.Join(basePath, filepath.FromSlash(relPath))
+	fullPath := filepath.Join(cleanBase, filepath.FromSlash(relPath))
+	if err := ensurePathWithinBase(cleanBase, fullPath); err != nil {
+		return "", err
+	}
+
+	return fullPath, nil
+}
+
+func ensurePathWithinBase(basePath, path string) error {
+	rel, err := filepath.Rel(basePath, path)
+	if err != nil {
+		return fmt.Errorf("%w: failed to derive relative path for `%s`: %v", ErrOperationPathEscapesBase, path, err)
+	}
+
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: `%s`", ErrOperationPathEscapesBase, path)
+	}
+
+	return nil
+}
+
+func ensureNoSymlinkParents(basePath, path string) error {
+	cleanBase := filepath.Clean(basePath)
+	cleanPath := filepath.Clean(path)
+
+	if err := ensurePathWithinBase(cleanBase, cleanPath); err != nil {
+		return err
+	}
+	if cleanPath == cleanBase {
+		return nil
+	}
+
+	parent := filepath.Dir(cleanPath)
+	if parent == cleanPath {
+		return nil
+	}
+
+	relParent, err := filepath.Rel(cleanBase, parent)
+	if err != nil {
+		return fmt.Errorf("failed to derive parent path for `%s`: %w", cleanPath, err)
+	}
+	if relParent == "." {
+		return nil
+	}
+
+	current := cleanBase
+	for _, component := range strings.Split(relParent, string(filepath.Separator)) {
+		if component == "" || component == "." {
+			continue
+		}
+
+		current = filepath.Join(current, component)
+
+		info, err := os.Lstat(current)
+		if err != nil {
+			return fmt.Errorf("failed to inspect parent component `%s`: %w", current, err)
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: `%s`", ErrOperationPathSymlinkParent, current)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("parent component `%s` is not a directory", current)
+		}
+	}
+
+	return nil
 }
 
 func ensureParentDirectory(path string) error {

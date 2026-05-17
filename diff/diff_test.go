@@ -268,7 +268,7 @@ func TestPathsWithOptionsMetadataHookValidation(t *testing.T) {
 
 		err := PathsWithOptions(t.TempDir(), t.TempDir(), opts)
 		require.Error(t, err)
-		require.ErrorContains(t, err, "invalid diff options: xattr comparison enabled but xattr comparator is nil")
+		require.ErrorIs(t, err, ErrXAttrComparatorNil)
 	})
 
 	t.Run("ACLComparatorRequired", func(t *testing.T) {
@@ -279,7 +279,7 @@ func TestPathsWithOptionsMetadataHookValidation(t *testing.T) {
 
 		err := PathsWithOptions(t.TempDir(), t.TempDir(), opts)
 		require.Error(t, err)
-		require.ErrorContains(t, err, "invalid diff options: ACL comparison enabled but ACL comparator is nil")
+		require.ErrorIs(t, err, ErrACLComparatorNil)
 	})
 }
 
