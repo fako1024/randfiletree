@@ -1,7 +1,6 @@
 package diff
 
 import (
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,14 +11,15 @@ import (
 	"github.com/minio/highwayhash"
 )
 
-var hashKey []byte
-
-func init() {
-	var err error
-	hashKey, err = hex.DecodeString("000102030405060708090A0B0C0D0E0FF0E0D0C0B0A090807060504030201000")
-	if err != nil {
-		panic(err)
-	}
+var hashKey = []byte{
+	0x00, 0x01, 0x02, 0x03,
+	0x04, 0x05, 0x06, 0x07,
+	0x08, 0x09, 0x0a, 0x0b,
+	0x0c, 0x0d, 0x0e, 0x0f,
+	0xf0, 0xe0, 0xd0, 0xc0,
+	0xb0, 0xa0, 0x90, 0x80,
+	0x70, 0x60, 0x50, 0x40,
+	0x30, 0x20, 0x10, 0x00,
 }
 
 func collectPaths(basePath string, opts Options) (result collectedPaths, err error) {

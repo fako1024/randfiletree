@@ -57,11 +57,11 @@ func (o Options) validate() error {
 	}
 
 	if o.CompareXAttrs && o.XAttrComparator == nil {
-		return fmt.Errorf("xattr comparison enabled but xattr comparator is nil")
+		return ErrXAttrComparatorNil
 	}
 
 	if o.CompareACLs && o.ACLComparator == nil {
-		return fmt.Errorf("ACL comparison enabled but ACL comparator is nil")
+		return ErrACLComparatorNil
 	}
 
 	return nil

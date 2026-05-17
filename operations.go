@@ -17,6 +17,21 @@ const (
 var (
 	ErrUnsupportedOperation        = errors.New("operation kind unsupported")
 	ErrXAttrPlaceholderUnsupported = errors.New("xattr placeholder operation is not implemented")
+	ErrAllowedOperationKindsEmpty  = errors.New("allowed operation kinds must not be empty")
+
+	ErrCreateSymlinkLinkTargetEmpty       = errors.New("create-symlink link target must not be empty")
+	ErrCreateSymlinkLinkTargetContainsNUL = errors.New("create-symlink link target must not contain NUL bytes")
+	ErrCreateHardlinkSameSourceAndTarget  = errors.New("create-hardlink source and destination must differ")
+	ErrRenameSameSourceAndDestination     = errors.New("rename source and destination must differ")
+	ErrAppendDataEmpty                    = errors.New("append data must not be empty")
+	ErrOverwriteRangeDataEmpty            = errors.New("overwrite-range data must not be empty")
+	ErrSetXAttrNameEmpty                  = errors.New("set-xattr name must not be empty")
+	ErrSetXAttrNameContainsNUL            = errors.New("set-xattr name must not contain NUL bytes")
+	ErrRemoveXAttrNameEmpty               = errors.New("remove-xattr name must not be empty")
+	ErrRemoveXAttrNameContainsNUL         = errors.New("remove-xattr name must not contain NUL bytes")
+	ErrOperationPathEmpty                 = errors.New("path must not be empty")
+	ErrOperationPathContainsNUL           = errors.New("path must not contain NUL bytes")
+	ErrOperationPathIsRoot                = errors.New("path must not be root")
 )
 
 // OperationKind denotes a single mutation operation kind.
@@ -155,7 +170,7 @@ func (o OperationGenerationOptions) validate() error {
 		return fmt.Errorf("max data size must be > 0, got %d", o.MaxDataSize)
 	}
 	if len(o.AllowedKinds) == 0 {
-		return fmt.Errorf("allowed operation kinds must not be empty")
+		return ErrAllowedOperationKindsEmpty
 	}
 
 	seen := make(map[OperationKind]struct{}, len(o.AllowedKinds))
@@ -234,10 +249,10 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("create-symlink path: %w", err)
 		}
 		if next.LinkTarget == "" {
-			return Operation{}, fmt.Errorf("create-symlink link target must not be empty")
+			return Operation{}, ErrCreateSymlinkLinkTargetEmpty
 		}
 		if strings.Contains(next.LinkTarget, "\x00") {
-			return Operation{}, fmt.Errorf("create-symlink link target must not contain NUL bytes")
+			return Operation{}, ErrCreateSymlinkLinkTargetContainsNUL
 		}
 		next.Path = path
 
@@ -251,7 +266,7 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("create-hardlink source path: %w", err)
 		}
 		if path == source {
-			return Operation{}, fmt.Errorf("create-hardlink source and destination must differ")
+			return Operation{}, ErrCreateHardlinkSameSourceAndTarget
 		}
 		next.Path = path
 		next.SourcePath = source
@@ -273,7 +288,7 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("rename destination path: %w", err)
 		}
 		if source == destination {
-			return Operation{}, fmt.Errorf("rename source and destination must differ")
+			return Operation{}, ErrRenameSameSourceAndDestination
 		}
 		next.Path = source
 		next.Destination = destination
@@ -317,7 +332,7 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("append path: %w", err)
 		}
 		if len(next.Data) == 0 {
-			return Operation{}, fmt.Errorf("append data must not be empty")
+			return Operation{}, ErrAppendDataEmpty
 		}
 		next.Path = path
 
@@ -330,7 +345,7 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("overwrite-range offset must be >= 0, got %d", next.Offset)
 		}
 		if len(next.Data) == 0 {
-			return Operation{}, fmt.Errorf("overwrite-range data must not be empty")
+			return Operation{}, ErrOverwriteRangeDataEmpty
 		}
 		next.Path = path
 
@@ -340,10 +355,10 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("set-xattr path: %w", err)
 		}
 		if next.XAttrName == "" {
-			return Operation{}, fmt.Errorf("set-xattr name must not be empty")
+			return Operation{}, ErrSetXAttrNameEmpty
 		}
 		if strings.Contains(next.XAttrName, "\x00") {
-			return Operation{}, fmt.Errorf("set-xattr name must not contain NUL bytes")
+			return Operation{}, ErrSetXAttrNameContainsNUL
 		}
 		next.Path = path
 
@@ -353,10 +368,10 @@ func normalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, fmt.Errorf("remove-xattr path: %w", err)
 		}
 		if next.XAttrName == "" {
-			return Operation{}, fmt.Errorf("remove-xattr name must not be empty")
+			return Operation{}, ErrRemoveXAttrNameEmpty
 		}
 		if strings.Contains(next.XAttrName, "\x00") {
-			return Operation{}, fmt.Errorf("remove-xattr name must not contain NUL bytes")
+			return Operation{}, ErrRemoveXAttrNameContainsNUL
 		}
 		next.Path = path
 	}
@@ -366,10 +381,10 @@ func normalizeOperation(op Operation) (Operation, error) {
 
 func normalizeOperationPath(raw string, allowRoot bool) (string, error) {
 	if strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("path must not be empty")
+		return "", ErrOperationPathEmpty
 	}
 	if strings.Contains(raw, "\x00") {
-		return "", fmt.Errorf("path must not contain NUL bytes")
+		return "", ErrOperationPathContainsNUL
 	}
 
 	cleaned := gopath.Clean(raw)
@@ -377,7 +392,7 @@ func normalizeOperationPath(raw string, allowRoot bool) (string, error) {
 		return "", fmt.Errorf("path must be rooted (start with '/'), got %q", raw)
 	}
 	if !allowRoot && cleaned == "/" {
-		return "", fmt.Errorf("path must not be root")
+		return "", ErrOperationPathIsRoot
 	}
 
 	return cleaned, nil

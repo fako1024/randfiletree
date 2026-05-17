@@ -22,7 +22,7 @@ func NewWithOptions(basePath string, opts ...Option) (*Generator, error) {
 // Configure applies the provided options atomically.
 func (g *Generator) Configure(opts ...Option) error {
 	if g == nil {
-		return fmt.Errorf("nil generator")
+		return ErrNilGenerator
 	}
 
 	next := *g
@@ -414,7 +414,7 @@ func validateSymlinkStrategyGenerator(name string, gen SymlinkStrategyGenerator)
 
 func validateSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]float64) error {
 	if len(probabilities) == 0 {
-		return fmt.Errorf("symlink strategy probabilities must not be empty")
+		return ErrSymlinkStrategyProbabilitiesEmpty
 	}
 
 	total := 0.0
@@ -437,7 +437,7 @@ func validateSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]floa
 	}
 
 	if total <= 0 {
-		return fmt.Errorf("sum of symlink strategy probabilities must be > 0")
+		return ErrSymlinkStrategyProbabilitiesNonPositive
 	}
 
 	return nil

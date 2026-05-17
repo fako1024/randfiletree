@@ -337,8 +337,7 @@ func TestWriteRelSymlinkRejectsEmptyTarget(t *testing.T) {
 	g := New(dir)
 
 	err := g.writeRelSymlink(dir, "")
-	require.Error(t, err)
-	require.ErrorContains(t, err, "empty symlink target")
+	require.ErrorIs(t, err, ErrEmptySymlinkTarget)
 }
 
 func TestRunPlansAndAppliesHardlinks(t *testing.T) {

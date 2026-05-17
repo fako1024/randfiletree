@@ -449,7 +449,19 @@ func TestConfigureRejectsNilGenerator(t *testing.T) {
 	var g *Generator
 	err := g.Configure(WithSeed(1))
 	require.Error(t, err)
-	require.ErrorContains(t, err, "nil generator")
+	require.ErrorIs(t, err, ErrNilGenerator)
+}
+
+func TestValidateSymlinkStrategyProbabilitiesSentinelErrors(t *testing.T) {
+	t.Parallel()
+
+	err := validateSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{})
+	require.ErrorIs(t, err, ErrSymlinkStrategyProbabilitiesEmpty)
+
+	err = validateSymlinkStrategyProbabilities(map[SymlinkStrategy]float64{
+		SymlinkStrategyRelative: 0,
+	})
+	require.ErrorIs(t, err, ErrSymlinkStrategyProbabilitiesNonPositive)
 }
 
 func TestNewWithOptions(t *testing.T) {
