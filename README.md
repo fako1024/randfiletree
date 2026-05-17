@@ -35,9 +35,29 @@ Supported symlink strategies:
 For configurable strictness, use `diff.PathsWithOptions`:
 
 - `diff.DefaultOptions()` keeps compatibility with `diff.Paths`.
-- `diff.StrictLinuxOptions()` enables ownership and nanosecond mtime checks.
+- `diff.StrictLinuxOptions()` enables ownership, access-time, and nanosecond timestamp checks.
 - `Options` can independently toggle content hash, timestamp precision,
-  ownership, hardlink topology, and future xattr/ACL comparator hooks.
+  ownership, access-time, hardlink topology, and future xattr/ACL comparator hooks.
+
+## Linux Metadata Controls
+
+The generator can now apply Linux metadata controls for created files and
+directories:
+
+- ownership (`uid`/`gid`) via `WithOwnership(...)` / `WithOwnershipGenerators(...)`
+- nanosecond timestamp control for `atime`/`mtime` via
+  `WithTimestamps(...)` / `WithTimestampGenerators(...)`
+- special mode bits (`setuid`, `setgid`, `sticky`) through existing mode
+  generators (`WithFileModeGenerator`, `WithDirModeGenerator`)
+
+Important:
+
+- metadata controls are Linux-focused; non-Linux systems return explicit
+  unsupported errors when ownership/timestamp metadata controls are requested
+- ownership updates may require elevated capabilities; insufficient privileges
+  fail with explicit errors
+- `ctime` cannot be set directly from user space and is intentionally not
+  configurable
 
 ## Mutation Engine
 
