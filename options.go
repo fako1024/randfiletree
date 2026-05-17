@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"time"
 )
 
 // Option denotes a configuration option for a Generator.
@@ -167,6 +168,67 @@ func WithPathDepthGenerator(gen NumberGenerator) Option {
 			return err
 		}
 		g.pathDepthGen = gen
+		return nil
+	}
+}
+
+// WithOwnershipGenerators sets explicit uid/gid generators used for created files and directories.
+func WithOwnershipGenerators(uidGen, gidGen NumberGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateNumberGenerator("ownership uid generator", uidGen); err != nil {
+			return err
+		}
+		if err := validateNumberGenerator("ownership gid generator", gidGen); err != nil {
+			return err
+		}
+
+		g.ownershipUIDGen = uidGen
+		g.ownershipGIDGen = gidGen
+
+		return nil
+	}
+}
+
+// WithOwnership sets a fixed uid/gid used for created files and directories.
+func WithOwnership(uid, gid int) Option {
+	return func(g *Generator) error {
+		if uid < 0 {
+			return fmt.Errorf("ownership uid must be >= 0, got %d", uid)
+		}
+		if gid < 0 {
+			return fmt.Errorf("ownership gid must be >= 0, got %d", gid)
+		}
+
+		g.ownershipUIDGen = NumberGeneratorConstant(uid)
+		g.ownershipGIDGen = NumberGeneratorConstant(gid)
+
+		return nil
+	}
+}
+
+// WithTimestampGenerators sets explicit atime/mtime generators used with nanosecond precision on Linux.
+func WithTimestampGenerators(atimeGen, mtimeGen TimestampGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateTimestampGenerator("atime generator", atimeGen); err != nil {
+			return err
+		}
+		if err := validateTimestampGenerator("mtime generator", mtimeGen); err != nil {
+			return err
+		}
+
+		g.atimeGen = atimeGen
+		g.mtimeGen = mtimeGen
+
+		return nil
+	}
+}
+
+// WithTimestamps sets fixed atime/mtime used with nanosecond precision on Linux.
+func WithTimestamps(atime, mtime time.Time) Option {
+	return func(g *Generator) error {
+		g.atimeGen = TimestampGeneratorConstant(atime)
+		g.mtimeGen = TimestampGeneratorConstant(mtime)
+
 		return nil
 	}
 }
@@ -405,6 +467,14 @@ func validateBooleanGenerator(name string, gen BooleanGenerator) error {
 }
 
 func validateSymlinkStrategyGenerator(name string, gen SymlinkStrategyGenerator) error {
+	if gen == nil {
+		return fmt.Errorf("%s must not be nil", name)
+	}
+
+	return nil
+}
+
+func validateTimestampGenerator(name string, gen TimestampGenerator) error {
 	if gen == nil {
 		return fmt.Errorf("%s must not be nil", name)
 	}

@@ -30,10 +30,12 @@ type plannedEntry struct {
 	typeID plannedEntryType
 	path   string
 
-	mode fs.FileMode
+	mode uint32
 	data []byte
 
 	linkTarget string
+
+	metadata metadataConfig
 }
 
 type runPlan struct {
@@ -85,9 +87,10 @@ func (g *Generator) planDir(path string, depth int, state *planState, plan *runP
 	}
 
 	plan.entries = append(plan.entries, plannedEntry{
-		typeID: plannedEntryTypeDir,
-		path:   path,
-		mode:   fs.FileMode(g.dirModeGen(state.rnd)),
+		typeID:   plannedEntryTypeDir,
+		path:     path,
+		mode:     g.dirModeGen(state.rnd),
+		metadata: g.resolveMetadata(state.rnd),
 	})
 
 	nDirs := g.nDirsInDirGen(state.rnd)
@@ -305,10 +308,11 @@ func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error 
 	}
 
 	plan.entries = append(plan.entries, plannedEntry{
-		typeID: plannedEntryTypeFile,
-		path:   filePath,
-		mode:   fs.FileMode(g.fileModeGen(state.rnd)),
-		data:   data,
+		typeID:   plannedEntryTypeFile,
+		path:     filePath,
+		mode:     g.fileModeGen(state.rnd),
+		data:     data,
+		metadata: g.resolveMetadata(state.rnd),
 	})
 	state.registerFilePath(filePath)
 	state.lastPath = filePath
@@ -455,73 +459,97 @@ func (g *Generator) applyRunPlan(plan runPlan) error {
 		return validateRunMode(g.runMode)
 	}
 
+	createdDirs := make(map[string]plannedEntry)
+
 	for _, entry := range plan.entries {
-		if err := g.applyPlannedEntry(entry); err != nil {
+		created, err := g.applyPlannedEntry(entry)
+		if err != nil {
 			return err
+		}
+
+		if created && entry.typeID == plannedEntryTypeDir {
+			createdDirs[entry.path] = entry
+		}
+	}
+
+	for i := len(plan.entries) - 1; i >= 0; i-- {
+		entry := plan.entries[i]
+		if entry.typeID != plannedEntryTypeDir {
+			continue
+		}
+		if _, ok := createdDirs[entry.path]; !ok {
+			continue
+		}
+
+		if err := applyMetadata(entry.path, entry.mode, entry.metadata); err != nil {
+			return fmt.Errorf("failed to finalize metadata for planned directory `%s`: %w", entry.path, err)
 		}
 	}
 
 	return nil
 }
 
-func (g *Generator) applyPlannedEntry(entry plannedEntry) error {
+func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 	info, err := os.Lstat(entry.path)
 	if err == nil {
 		if g.runMode == RunModeStrict {
 			if entry.typeID == plannedEntryTypeDir && entry.path == g.basePath && info.IsDir() {
-				return nil
+				return false, nil
 			}
 
-			return fmt.Errorf("planned path already exists in strict mode: `%s`", entry.path)
+			return false, fmt.Errorf("planned path already exists in strict mode: `%s`", entry.path)
 		}
 
 		switch entry.typeID {
 		case plannedEntryTypeDir:
 			if !info.IsDir() {
-				return fmt.Errorf("planned directory path `%s` already exists as non-directory", entry.path)
+				return false, fmt.Errorf("planned directory path `%s` already exists as non-directory", entry.path)
 			}
 		case plannedEntryTypeFile:
 			if !info.Mode().IsRegular() {
-				return fmt.Errorf("planned file path `%s` already exists as non-regular file", entry.path)
+				return false, fmt.Errorf("planned file path `%s` already exists as non-regular file", entry.path)
 			}
 		case plannedEntryTypeSymlink:
 			if info.Mode()&os.ModeSymlink == 0 {
-				return fmt.Errorf("planned symlink path `%s` already exists as non-symlink", entry.path)
+				return false, fmt.Errorf("planned symlink path `%s` already exists as non-symlink", entry.path)
 			}
 		case plannedEntryTypeHardlink:
 			if !info.Mode().IsRegular() {
-				return fmt.Errorf("planned hardlink path `%s` already exists as non-regular file", entry.path)
+				return false, fmt.Errorf("planned hardlink path `%s` already exists as non-regular file", entry.path)
 			}
 		default:
-			return fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
+			return false, fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
 		}
 
-		return nil
+		return false, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("failed to inspect planned path `%s`: %w", entry.path, err)
+		return false, fmt.Errorf("failed to inspect planned path `%s`: %w", entry.path, err)
 	}
 
 	switch entry.typeID {
 	case plannedEntryTypeDir:
-		if err := os.MkdirAll(entry.path, entry.mode); err != nil {
-			return fmt.Errorf("failed to create planned directory `%s`: %w", entry.path, err)
+		if err := os.MkdirAll(entry.path, fs.FileMode(entry.mode&0o777)); err != nil {
+			return false, fmt.Errorf("failed to create planned directory `%s`: %w", entry.path, err)
 		}
 	case plannedEntryTypeFile:
-		if err := os.WriteFile(entry.path, entry.data, entry.mode); err != nil {
-			return fmt.Errorf("failed to create planned file `%s`: %w", entry.path, err)
+		if err := os.WriteFile(entry.path, entry.data, fs.FileMode(entry.mode&0o777)); err != nil {
+			return false, fmt.Errorf("failed to create planned file `%s`: %w", entry.path, err)
+		}
+		if err := applyMetadata(entry.path, entry.mode, entry.metadata); err != nil {
+			return false, fmt.Errorf("failed to apply metadata for planned file `%s`: %w", entry.path, err)
 		}
 	case plannedEntryTypeSymlink:
 		if err := os.Symlink(entry.linkTarget, entry.path); err != nil {
-			return fmt.Errorf("failed to create planned symlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
+			return false, fmt.Errorf("failed to create planned symlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
 		}
 	case plannedEntryTypeHardlink:
 		if err := os.Link(entry.linkTarget, entry.path); err != nil {
-			return fmt.Errorf("failed to create planned hardlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
+			return false, fmt.Errorf("failed to create planned hardlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
 		}
 	default:
-		return fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
+		return false, fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
 	}
 
-	return nil
+	return true, nil
 }
