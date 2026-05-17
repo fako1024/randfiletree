@@ -10,14 +10,17 @@ type Node struct {
 	Size    int64
 	Mode    fs.FileMode
 	ModTime int64
+	Atime   int64
 
 	ModTimeNsec int64
+	AtimeNsec   int64
 
 	Hash []byte
 
-	UID          uint32
-	GID          uint32
-	HasOwnership bool
+	UID           uint32
+	GID           uint32
+	HasOwnership  bool
+	HasAccessTime bool
 }
 
 type collectedPaths struct {

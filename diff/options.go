@@ -21,6 +21,7 @@ type Options struct {
 	CompareContentHash      bool
 	TimestampPrecision      TimestampPrecision
 	CompareOwnership        bool
+	CompareAccessTime       bool
 	CompareHardlinkTopology bool
 
 	CompareXAttrs   bool
@@ -36,6 +37,7 @@ func DefaultOptions() Options {
 		CompareContentHash:      true,
 		TimestampPrecision:      TimestampPrecisionSeconds,
 		CompareOwnership:        false,
+		CompareAccessTime:       false,
 		CompareHardlinkTopology: true,
 		CompareXAttrs:           false,
 		CompareACLs:             false,
@@ -47,6 +49,7 @@ func StrictLinuxOptions() Options {
 	opts := DefaultOptions()
 	opts.TimestampPrecision = TimestampPrecisionNanoseconds
 	opts.CompareOwnership = true
+	opts.CompareAccessTime = true
 
 	return opts
 }

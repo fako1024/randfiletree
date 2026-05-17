@@ -33,6 +33,10 @@ func PathsWithOptions(a, b string, opts Options) error {
 		return err
 	}
 
+	if err := ensureAccessTimeMetadata(pathsA.nodes, pathsB.nodes, opts); err != nil {
+		return err
+	}
+
 	if diff := cmp.Diff(projectNodes(pathsA.nodes, opts), projectNodes(pathsB.nodes, opts)); diff != "" {
 		return fmt.Errorf("mismatch (-want +got):\n%s", diff)
 	}
@@ -77,6 +81,7 @@ type projectedNode struct {
 	Size    int64
 	Mode    uint32
 	ModTime int64
+	Atime   int64
 
 	Hash []byte
 
@@ -94,10 +99,12 @@ func projectNodes(nodes []Node, opts Options) []projectedNode {
 			Size:       node.Size,
 			Mode:       uint32(node.Mode),
 			ModTime:    node.ModTime,
+			Atime:      node.Atime,
 		}
 
 		if opts.TimestampPrecision == TimestampPrecisionNanoseconds {
 			projectedNode.ModTime = node.ModTimeNsec
+			projectedNode.Atime = node.AtimeNsec
 		}
 
 		if opts.CompareContentHash {
@@ -107,6 +114,10 @@ func projectNodes(nodes []Node, opts Options) []projectedNode {
 		if opts.CompareOwnership {
 			projectedNode.UID = node.UID
 			projectedNode.GID = node.GID
+		}
+
+		if !opts.CompareAccessTime {
+			projectedNode.Atime = 0
 		}
 
 		projected[i] = projectedNode
@@ -131,6 +142,26 @@ func runMetadataHooks(nodesA, nodesB []Node, opts Options) error {
 			if err := opts.ACLComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
 				return fmt.Errorf("ACL mismatch for path `%s`: %w", nodesA[i].Path, err)
 			}
+		}
+	}
+
+	return nil
+}
+
+func ensureAccessTimeMetadata(nodesA, nodesB []Node, opts Options) error {
+	if !opts.CompareAccessTime {
+		return nil
+	}
+
+	for _, node := range nodesA {
+		if !node.HasAccessTime {
+			return fmt.Errorf("access-time comparison requested but metadata unavailable for left path `%s`", node.Path)
+		}
+	}
+
+	for _, node := range nodesB {
+		if !node.HasAccessTime {
+			return fmt.Errorf("access-time comparison requested but metadata unavailable for right path `%s`", node.Path)
 		}
 	}
 
