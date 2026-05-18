@@ -46,7 +46,7 @@ func collectPaths(basePath string, opts Options) (result collectedPaths, err err
 			return nil
 		}
 
-		if err := collectPlatformMetadata(path, &node); err != nil {
+		if err := collectPlatformMetadata(path, &node, opts); err != nil {
 			return err
 		}
 

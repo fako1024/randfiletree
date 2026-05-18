@@ -59,13 +59,5 @@ func (o Options) validate() error {
 		return fmt.Errorf("invalid timestamp precision: %d", o.TimestampPrecision)
 	}
 
-	if o.CompareXAttrs && o.XAttrComparator == nil {
-		return ErrXAttrComparatorNil
-	}
-
-	if o.CompareACLs && o.ACLComparator == nil {
-		return ErrACLComparatorNil
-	}
-
 	return nil
 }

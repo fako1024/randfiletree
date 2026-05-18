@@ -15,9 +15,8 @@ const (
 )
 
 var (
-	ErrUnsupportedOperation        = errors.New("operation kind unsupported")
-	ErrXAttrPlaceholderUnsupported = errors.New("xattr placeholder operation is not implemented")
-	ErrAllowedOperationKindsEmpty  = errors.New("allowed operation kinds must not be empty")
+	ErrUnsupportedOperation       = errors.New("operation kind unsupported")
+	ErrAllowedOperationKindsEmpty = errors.New("allowed operation kinds must not be empty")
 
 	ErrCreateSymlinkLinkTargetEmpty       = errors.New("create-symlink link target must not be empty")
 	ErrCreateSymlinkLinkTargetContainsNUL = errors.New("create-symlink link target must not contain NUL bytes")
@@ -25,10 +24,10 @@ var (
 	ErrRenameSameSourceAndDestination     = errors.New("rename source and destination must differ")
 	ErrAppendDataEmpty                    = errors.New("append data must not be empty")
 	ErrOverwriteRangeDataEmpty            = errors.New("overwrite-range data must not be empty")
-	ErrSetXAttrNameEmpty                  = errors.New("set-xattr name must not be empty")
-	ErrSetXAttrNameContainsNUL            = errors.New("set-xattr name must not contain NUL bytes")
-	ErrRemoveXAttrNameEmpty               = errors.New("remove-xattr name must not be empty")
-	ErrRemoveXAttrNameContainsNUL         = errors.New("remove-xattr name must not contain NUL bytes")
+	ErrSetXAttrNameEmpty                  = ErrXAttrNameEmpty
+	ErrSetXAttrNameContainsNUL            = ErrXAttrNameContainsNUL
+	ErrRemoveXAttrNameEmpty               = ErrXAttrNameEmpty
+	ErrRemoveXAttrNameContainsNUL         = ErrXAttrNameContainsNUL
 	ErrOperationPathEmpty                 = errors.New("path must not be empty")
 	ErrOperationPathContainsNUL           = errors.New("path must not contain NUL bytes")
 	ErrOperationPathIsRoot                = errors.New("path must not be root")
@@ -354,26 +353,24 @@ func normalizeOperation(op Operation) (Operation, error) {
 		if err != nil {
 			return Operation{}, fmt.Errorf("set-xattr path: %w", err)
 		}
-		if next.XAttrName == "" {
-			return Operation{}, ErrSetXAttrNameEmpty
-		}
-		if strings.Contains(next.XAttrName, "\x00") {
-			return Operation{}, ErrSetXAttrNameContainsNUL
+		normalizedName, err := validateXAttrName(next.XAttrName)
+		if err != nil {
+			return Operation{}, fmt.Errorf("set-xattr name: %w", err)
 		}
 		next.Path = path
+		next.XAttrName = normalizedName
 
 	case OperationKindRemoveXAttr:
 		path, err := normalizeOperationPath(next.Path, true)
 		if err != nil {
 			return Operation{}, fmt.Errorf("remove-xattr path: %w", err)
 		}
-		if next.XAttrName == "" {
-			return Operation{}, ErrRemoveXAttrNameEmpty
-		}
-		if strings.Contains(next.XAttrName, "\x00") {
-			return Operation{}, ErrRemoveXAttrNameContainsNUL
+		normalizedName, err := validateXAttrName(next.XAttrName)
+		if err != nil {
+			return Operation{}, fmt.Errorf("remove-xattr name: %w", err)
 		}
 		next.Path = path
+		next.XAttrName = normalizedName
 	}
 
 	return next, nil
