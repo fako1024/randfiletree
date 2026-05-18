@@ -34,6 +34,8 @@ type plannedEntry struct {
 	mode uint32
 	data []byte
 
+	contentPattern plannedFileContent
+
 	linkTarget string
 
 	specialFileType SpecialFileType
@@ -368,23 +370,35 @@ func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error 
 		return err
 	}
 
-	data, err := g.dataGen(state.rnd)
-	if err != nil {
-		return fmt.Errorf("failed to generate file data for `%s`: %w", filePath, err)
+	entry := plannedEntry{
+		typeID: plannedEntryTypeFile,
+		path:   filePath,
+		mode:   g.fileModeGen(state.rnd),
+	}
+
+	if g.hasContentPatternConfiguration() {
+		contentPattern, err := g.planFileContentPattern(state.rnd)
+		if err != nil {
+			return fmt.Errorf("failed to generate file content pattern for `%s`: %w", filePath, err)
+		}
+
+		entry.contentPattern = contentPattern
+	} else {
+		data, err := g.dataGen(state.rnd)
+		if err != nil {
+			return fmt.Errorf("failed to generate file data for `%s`: %w", filePath, err)
+		}
+
+		entry.data = data
 	}
 
 	metadata, err := g.resolveMetadata(state.rnd)
 	if err != nil {
 		return err
 	}
+	entry.metadata = metadata
 
-	plan.entries = append(plan.entries, plannedEntry{
-		typeID:   plannedEntryTypeFile,
-		path:     filePath,
-		mode:     g.fileModeGen(state.rnd),
-		data:     data,
-		metadata: metadata,
-	})
+	plan.entries = append(plan.entries, entry)
 	state.registerFilePath(filePath)
 	state.lastPath = filePath
 
@@ -612,8 +626,14 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 			return false, fmt.Errorf("failed to create planned directory `%s`: %w", entry.path, err)
 		}
 	case plannedEntryTypeFile:
-		if err := os.WriteFile(entry.path, entry.data, fs.FileMode(entry.mode&0o777)); err != nil {
-			return false, fmt.Errorf("failed to create planned file `%s`: %w", entry.path, err)
+		if entry.contentPattern.pattern != 0 {
+			if err := writePlannedFileContent(entry.path, entry.mode, entry.contentPattern); err != nil {
+				return false, err
+			}
+		} else {
+			if err := os.WriteFile(entry.path, entry.data, fs.FileMode(entry.mode&0o777)); err != nil {
+				return false, fmt.Errorf("failed to create planned file `%s`: %w", entry.path, err)
+			}
 		}
 		if err := applyMetadata(entry.path, entry.mode, entry.metadata); err != nil {
 			return false, fmt.Errorf("failed to apply metadata for planned file `%s`: %w", entry.path, err)

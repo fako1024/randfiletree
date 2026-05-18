@@ -38,6 +38,10 @@ type Node struct {
 
 	InodeType InodeType
 
+	AllocatedBlocks    int64
+	HasAllocatedBlocks bool
+	SparseParity       bool
+
 	DeviceMajor      uint32
 	DeviceMinor      uint32
 	HasDeviceNumbers bool

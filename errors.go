@@ -14,9 +14,15 @@ var (
 	ErrSpecialDeviceConfigurationIncomplete    = errors.New("special device configuration requires both major and minor generators")
 	ErrSpecialDeviceNumbersRequired            = errors.New("special device generation requires major and minor number generators")
 
+	ErrContentPatternProbabilitiesEmpty       = errors.New("content pattern probabilities must not be empty")
+	ErrContentPatternProbabilitiesNonPositive = errors.New("sum of content pattern probabilities must be > 0")
+	ErrContentPatternConfigurationIncomplete  = errors.New("content pattern configuration requires both pattern and logical size generators")
+
 	ErrSpecialFilePermissionDenied = errors.New("insufficient privileges to create requested special file")
 	ErrSpecialFileUnsupported      = errors.New("special file generation is unsupported on this filesystem or platform")
 	ErrSpecialFileLinuxOnly        = errors.New("special file generation is only supported on linux")
+
+	ErrContentPatternRepeatedBlockEmpty = errors.New("repeated-block content pattern requires non-empty data block")
 
 	ErrOwnershipMetadataConfigurationIncomplete = errors.New("ownership metadata configuration requires both uid and gid generators")
 	ErrTimestampMetadataConfigurationIncomplete = errors.New("timestamp metadata configuration requires both atime and mtime generators")
