@@ -127,6 +127,12 @@ func TestHardlinkTopologyMismatch(t *testing.T) {
 	require.NoError(t, os.Link(aTarget, filepath.Join(pathA, "link.txt")))
 	require.NoError(t, os.WriteFile(filepath.Join(pathB, "link.txt"), []byte("shared-data"), 0o600))
 
+	ts := time.Unix(1_700_000_000, 0)
+	require.NoError(t, os.Chtimes(aTarget, ts, ts))
+	require.NoError(t, os.Chtimes(filepath.Join(pathA, "link.txt"), ts, ts))
+	require.NoError(t, os.Chtimes(bTarget, ts, ts))
+	require.NoError(t, os.Chtimes(filepath.Join(pathB, "link.txt"), ts, ts))
+
 	err := Paths(pathA, pathB)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "hardlink topology mismatch")

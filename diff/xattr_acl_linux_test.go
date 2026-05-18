@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -101,18 +102,29 @@ func TestPathsWithOptionsACLParity(t *testing.T) {
 	require.NoError(t, os.MkdirAll(left, 0o750))
 	require.NoError(t, os.MkdirAll(right, 0o750))
 
-	setACL(t, left, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
-	setACL(t, right, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
+	leftDir := filepath.Join(left, "dir")
+	rightDir := filepath.Join(right, "dir")
+	require.NoError(t, os.MkdirAll(leftDir, 0o750))
+	require.NoError(t, os.MkdirAll(rightDir, 0o750))
 
-	requireACEPresent(t, left, "default:group::r-x")
-	requireACEPresent(t, right, "default:group::r-x")
+	setACL(t, leftDir, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
+	setACL(t, rightDir, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
+
+	fixed := time.Unix(1_779_000_000, 0)
+	require.NoError(t, os.Chtimes(leftDir, fixed, fixed))
+	require.NoError(t, os.Chtimes(rightDir, fixed, fixed))
+
+	requireACEPresent(t, leftDir, "default:group::r-x")
+	requireACEPresent(t, rightDir, "default:group::r-x")
 
 	opts := DefaultOptions()
 	opts.CompareACLs = true
 	require.NoError(t, PathsWithOptions(left, right, opts))
 
-	setACL(t, right, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::--x,d:o::---")
-	requireACEPresent(t, right, "default:group::--x")
+	setACL(t, rightDir, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::--x,d:o::---")
+	require.NoError(t, os.Chtimes(leftDir, fixed, fixed))
+	require.NoError(t, os.Chtimes(rightDir, fixed, fixed))
+	requireACEPresent(t, rightDir, "default:group::--x")
 	err := PathsWithOptions(left, right, opts)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "ACL mismatch")
