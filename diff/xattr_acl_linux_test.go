@@ -101,23 +101,18 @@ func TestPathsWithOptionsACLParity(t *testing.T) {
 	require.NoError(t, os.MkdirAll(left, 0o750))
 	require.NoError(t, os.MkdirAll(right, 0o750))
 
-	leftFile := filepath.Join(left, "file.txt")
-	rightFile := filepath.Join(right, "file.txt")
-	require.NoError(t, os.WriteFile(leftFile, []byte("same"), 0o600))
-	require.NoError(t, os.WriteFile(rightFile, []byte("same"), 0o600))
+	setACL(t, left, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
+	setACL(t, right, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
 
-	setACL(t, leftFile, "u::rw-,g::r--")
-	setACL(t, rightFile, "u::rw-,g::r--")
-
-	requireACEPresent(t, leftFile, "group::r--")
-	requireACEPresent(t, rightFile, "group::r--")
+	requireACEPresent(t, left, "default:group::r-x")
+	requireACEPresent(t, right, "default:group::r-x")
 
 	opts := DefaultOptions()
 	opts.CompareACLs = true
 	require.NoError(t, PathsWithOptions(left, right, opts))
 
-	setACL(t, rightFile, "u::rw-,g::---")
-	requireACEPresent(t, rightFile, "group::---")
+	setACL(t, right, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::--x,d:o::---")
+	requireACEPresent(t, right, "default:group::--x")
 	err := PathsWithOptions(left, right, opts)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "ACL mismatch")
