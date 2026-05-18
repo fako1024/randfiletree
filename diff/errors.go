@@ -11,5 +11,4 @@ var (
 
 	ErrXAttrCollectionUnsupported = errors.New("xattr metadata collection unsupported")
 	ErrACLCollectionUnsupported   = errors.New("ACL metadata collection unsupported")
-	ErrACLToolingUnavailable      = errors.New("ACL tooling unavailable")
 )

@@ -5,12 +5,11 @@ package diff
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/fako1024/randfiletree/internal/aclxattr"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
@@ -69,12 +68,8 @@ func TestPathsWithOptionsXAttrUnavailableExplicit(t *testing.T) {
 	)
 }
 
-func TestPathsWithOptionsACLUnavailableExplicit(t *testing.T) {
+func TestPathsWithOptionsACLUnsupportedExplicit(t *testing.T) {
 	t.Parallel()
-
-	if _, err := exec.LookPath("getfacl"); err == nil {
-		t.Skip("getfacl present in environment")
-	}
 
 	base := t.TempDir()
 	left := filepath.Join(base, "left")
@@ -88,13 +83,20 @@ func TestPathsWithOptionsACLUnavailableExplicit(t *testing.T) {
 	opts.CompareACLs = true
 
 	err := PathsWithOptions(left, right, opts)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrACLToolingUnavailable)
+	if err == nil {
+		return
+	}
+
+	require.True(t,
+		errors.Is(err, ErrACLCollectionUnsupported) || errors.Is(err, ErrACLMetadataUnavailable),
+		"unexpected ACL failure: %v",
+		err,
+	)
 }
 
 func TestPathsWithOptionsACLParity(t *testing.T) {
 	t.Parallel()
-	requireACLTooling(t)
+	requireACLXAttrSupport(t)
 
 	base := t.TempDir()
 	left := filepath.Join(base, "left")
@@ -107,24 +109,20 @@ func TestPathsWithOptionsACLParity(t *testing.T) {
 	require.NoError(t, os.MkdirAll(leftDir, 0o750))
 	require.NoError(t, os.MkdirAll(rightDir, 0o750))
 
-	setACL(t, leftDir, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
-	setACL(t, rightDir, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::r-x,d:o::---")
+	setACL(t, leftDir, "u::rwx", "g::r-x", "o::---", "default:u::rwx", "default:g::r-x", "default:o::---")
+	setACL(t, rightDir, "u::rwx", "g::r-x", "o::---", "default:u::rwx", "default:g::r-x", "default:o::---")
 
 	fixed := time.Unix(1_779_000_000, 0)
 	require.NoError(t, os.Chtimes(leftDir, fixed, fixed))
 	require.NoError(t, os.Chtimes(rightDir, fixed, fixed))
 
-	requireACEPresent(t, leftDir, "default:group::r-x")
-	requireACEPresent(t, rightDir, "default:group::r-x")
-
 	opts := DefaultOptions()
 	opts.CompareACLs = true
 	require.NoError(t, PathsWithOptions(left, right, opts))
 
-	setACL(t, rightDir, "u::rwx,g::r-x,o::---,d:u::rwx,d:g::--x,d:o::---")
+	setACL(t, rightDir, "u::rwx", "g::r-x", "o::---", "default:u::rwx", "default:g::--x", "default:o::---")
 	require.NoError(t, os.Chtimes(leftDir, fixed, fixed))
 	require.NoError(t, os.Chtimes(rightDir, fixed, fixed))
-	requireACEPresent(t, rightDir, "default:group::--x")
 	err := PathsWithOptions(left, right, opts)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "ACL mismatch")
@@ -148,47 +146,58 @@ func requireXAttrSupport(t *testing.T) {
 	}
 }
 
-func requireACLTooling(t *testing.T) {
+func requireACLXAttrSupport(t *testing.T) {
 	t.Helper()
+	probeDir := filepath.Join(t.TempDir(), "probe")
+	require.NoError(t, os.MkdirAll(probeDir, 0o750))
 
-	if _, err := exec.LookPath("setfacl"); err != nil {
-		t.Skipf("setfacl unavailable: %v", err)
-	}
-
-	if _, err := exec.LookPath("getfacl"); err != nil {
-		t.Skipf("getfacl unavailable: %v", err)
-	}
+	setACL(t, probeDir, "u::rwx", "g::r-x", "o::---", "default:u::rwx", "default:g::r-x", "default:o::---")
 }
 
-func setACL(t *testing.T, path, acl string) {
+func setACL(t *testing.T, path string, entries ...string) {
 	t.Helper()
 
-	reset := exec.Command("setfacl", "-b", path) // #nosec G204
-	if out, err := reset.CombinedOutput(); err != nil {
-		t.Skipf("failed to reset ACL on %s: %v (%s)", path, err, string(out))
-	}
+	accessEntries, defaultEntries, err := aclxattr.ParseTextEntries(entries)
+	require.NoError(t, err)
 
-	cmd := exec.Command("setfacl", "-m", acl, path) // #nosec G204
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Skipf("failed to apply ACL on %s: %v (%s)", path, err, string(out))
-	}
-}
+	clearACLXAttr(t, path, aclxattr.XAttrAccess)
+	clearACLXAttr(t, path, aclxattr.XAttrDefault)
 
-func requireACEPresent(t *testing.T, path, expectedEntry string) {
-	t.Helper()
-
-	cmd := exec.Command("getfacl", "--absolute-names", "--omit-header", path) // #nosec G204
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Skipf("failed to inspect ACL on %s: %v (%s)", path, err, string(output))
-	}
-
-	entries := strings.Split(string(output), "\n")
-	for _, entry := range entries {
-		if strings.TrimSpace(entry) == expectedEntry {
-			return
+	if len(accessEntries) > 0 {
+		accessPayload, marshalErr := aclxattr.Marshal(accessEntries)
+		require.NoError(t, marshalErr)
+		if setErr := unix.Lsetxattr(path, aclxattr.XAttrAccess, accessPayload, 0); setErr != nil {
+			skipIfACLUnsupported(t, setErr)
+			require.NoError(t, setErr)
 		}
 	}
 
-	t.Skipf("ACL entry %q missing on %s (output: %s)", expectedEntry, path, string(output))
+	if len(defaultEntries) > 0 {
+		defaultPayload, marshalErr := aclxattr.Marshal(defaultEntries)
+		require.NoError(t, marshalErr)
+		if setErr := unix.Lsetxattr(path, aclxattr.XAttrDefault, defaultPayload, 0); setErr != nil {
+			skipIfACLUnsupported(t, setErr)
+			require.NoError(t, setErr)
+		}
+	}
+}
+
+func clearACLXAttr(t *testing.T, path, name string) {
+	t.Helper()
+
+	err := unix.Lremovexattr(path, name)
+	if err == nil || errors.Is(err, unix.ENODATA) {
+		return
+	}
+
+	skipIfACLUnsupported(t, err)
+	require.NoError(t, err)
+}
+
+func skipIfACLUnsupported(t *testing.T, err error) {
+	t.Helper()
+
+	if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.EINVAL) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+		t.Skipf("ACL xattr unavailable in this test environment: %v", err)
+	}
 }

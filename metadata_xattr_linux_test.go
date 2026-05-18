@@ -4,12 +4,12 @@ package randfiletree
 
 import (
 	"errors"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/fako1024/randfiletree/internal/aclxattr"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 func TestRunAppliesConfiguredXAttrs(t *testing.T) {
@@ -73,99 +73,60 @@ func TestRunTrustedXAttrOptInSurfacePermissionError(t *testing.T) {
 	)
 }
 
-func TestRunACLRequiresCommandBackendOptIn(t *testing.T) {
+func TestRunACLInvalidEntry(t *testing.T) {
 	t.Parallel()
 
 	base := filepath.Join(t.TempDir(), "tree")
 	g := newMetadataConfiguredGenerator(t, base,
-		WithACL("u::rw-", "g::r--"),
+		WithACL("invalid-entry"),
 	)
 
 	err := g.Run()
 	require.Error(t, err)
-	require.ErrorContains(t, err, ErrACLConfigurationIncomplete.Error())
+	require.ErrorIs(t, err, ErrACLInvalidEntry)
 }
 
-func TestRunACLToolingAvailabilityIsExplicit(t *testing.T) {
+func TestRunACLRequiresDirectoryForDefaultEntries(t *testing.T) {
 	t.Parallel()
-
-	if _, err := execLookPath("setfacl"); err == nil {
-		t.Skip("setfacl present in environment")
-	}
 
 	base := filepath.Join(t.TempDir(), "tree")
 	g := newMetadataConfiguredGenerator(t, base,
-		WithACL("u::rw-", "g::r--"),
-		WithACLCommandBackend(true),
+		WithACL("default:u::rwx", "default:g::r-x", "default:o::---"),
 	)
 
 	err := g.Run()
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrACLToolingUnavailable)
+	require.ErrorIs(t, err, ErrACLInvalidEntry)
 }
 
-func TestRunACLAppliedWhenToolingAvailable(t *testing.T) {
+func TestRunACLAppliedWhenSupported(t *testing.T) {
 	t.Parallel()
-	requireMutationACLTooling(t)
+	requireMutationXAttrSupport(t)
 
 	base := filepath.Join(t.TempDir(), "tree")
 	g := newMetadataConfiguredGenerator(t, base,
-		WithACL("u::rwx", "g::r-x", "m::rwx", "o::---"),
-		WithACLCommandBackend(true),
+		WithACL("u::rwx", "g::r-x", "o::---", "m::r-x"),
 	)
 
 	err := g.Run()
 	if err != nil {
-		if errors.Is(err, ErrACLUnsupported) || errors.Is(err, ErrACLPermissionDenied) {
+		if errors.Is(err, ErrACLUnsupported) || errors.Is(err, ErrACLPermissionDenied) || errors.Is(err, ErrXAttrUnsupported) {
 			t.Skipf("ACL application unavailable in environment: %v", err)
 		}
 
 		require.NoError(t, err)
 	}
 
-	entries, readErr := readACL(filepath.Join(base, "file"))
-	if readErr != nil {
-		t.Skipf("failed to read ACL in environment: %v", readErr)
+	entries, readErr := readPathACL(filepath.Join(base, "file"))
+	if readErr != nil && errors.Is(readErr, ErrACLUnsupported) {
+		t.Skipf("ACL read unsupported in environment: %v", readErr)
 	}
+	require.NoError(t, readErr)
 
-	require.True(t, containsACLEntryPrefix(entries, "user::"), "expected user ACL entry, got: %v", entries)
-	require.True(t, containsACLEntryPrefix(entries, "group::"), "expected group ACL entry, got: %v", entries)
-	require.True(t, containsACLEntryPrefix(entries, "other::---"), "expected other ACL entry, got: %v", entries)
-}
-
-func readACL(path string) ([]string, error) {
-	if _, err := execLookPath("getfacl"); err != nil {
-		return nil, err
-	}
-
-	cmd := exec.Command("getfacl", "--absolute-names", "--omit-header", path) // #nosec G204
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(string(output), "\n")
-	entries := make([]string, 0, len(lines))
-	for _, line := range lines {
-		entry := strings.TrimSpace(line)
-		if entry == "" || strings.HasPrefix(entry, "#") {
-			continue
-		}
-
-		entries = append(entries, entry)
-	}
-
-	return entries, nil
-}
-
-func containsACLEntryPrefix(entries []string, prefix string) bool {
-	for _, entry := range entries {
-		if strings.HasPrefix(entry, prefix) {
-			return true
-		}
-	}
-
-	return false
+	require.Contains(t, entries, "user::rwx")
+	require.Contains(t, entries, "group::r-x")
+	require.Contains(t, entries, "other::---")
+	require.Contains(t, entries, "mask::r-x")
 }
 
 func errorIsAny(err error, candidates ...error) bool {
@@ -178,16 +139,47 @@ func errorIsAny(err error, candidates ...error) bool {
 	return false
 }
 
-func requireMutationACLTooling(t *testing.T) {
-	t.Helper()
-
-	if _, err := execLookPath("setfacl"); err != nil {
-		t.Skipf("setfacl unavailable: %v", err)
+func readPathACL(path string) ([]string, error) {
+	accessRaw, err := readACLXAttr(path, aclxattr.XAttrAccess)
+	if err != nil {
+		return nil, err
 	}
 
-	if _, err := execLookPath("getfacl"); err != nil {
-		t.Skipf("getfacl unavailable: %v", err)
+	defaultRaw, err := readACLXAttr(path, aclxattr.XAttrDefault)
+	if err != nil {
+		return nil, err
 	}
+
+	return aclxattr.FormatTextEntries(accessRaw, defaultRaw), nil
 }
 
-var execLookPath = exec.LookPath
+func readACLXAttr(path, name string) ([]aclxattr.Entry, error) {
+	size, err := unix.Lgetxattr(path, name, nil)
+	if err != nil {
+		switch {
+		case errors.Is(err, unix.ENODATA):
+			return nil, nil
+		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EINVAL):
+			return nil, ErrACLUnsupported
+		default:
+			return nil, err
+		}
+	}
+
+	if size == 0 {
+		return nil, nil
+	}
+
+	buf := make([]byte, size)
+	readSize, err := unix.Lgetxattr(path, name, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := aclxattr.Parse(buf[:readSize])
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}

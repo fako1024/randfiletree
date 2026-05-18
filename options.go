@@ -347,14 +347,6 @@ func WithACL(entries ...string) Option {
 	return WithACLGenerator(ACLGeneratorFixed(fixed))
 }
 
-// WithACLCommandBackend sets whether ACL command tooling is allowed.
-func WithACLCommandBackend(enabled bool) Option {
-	return func(g *Generator) error {
-		g.aclCommandBackendEnabled = enabled
-		return nil
-	}
-}
-
 // WithSymlinkGenerator sets the generator used to decide whether to create symlinks.
 func WithSymlinkGenerator(gen BooleanGenerator) Option {
 	return func(g *Generator) error {

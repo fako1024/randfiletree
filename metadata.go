@@ -47,9 +47,8 @@ type metadataConfig struct {
 	hasXAttrs bool
 	xattrs    map[string][]byte
 
-	hasACL      bool
-	aclEntries  []string
-	aclUseTools bool
+	hasACL     bool
+	aclEntries []string
 }
 
 func (g *Generator) resolveMetadata(r *rand.Rand) (metadataConfig, error) {
@@ -95,7 +94,6 @@ func (g *Generator) resolveMetadata(r *rand.Rand) (metadataConfig, error) {
 
 		metadata.hasACL = true
 		metadata.aclEntries = normalized
-		metadata.aclUseTools = g.aclCommandBackendEnabled
 	}
 
 	return metadata, nil

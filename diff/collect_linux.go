@@ -3,13 +3,12 @@
 package diff
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 
+	"github.com/fako1024/randfiletree/internal/aclxattr"
 	"golang.org/x/sys/unix"
 )
 
@@ -137,42 +136,39 @@ func getXAttr(path, name string) ([]byte, error) {
 }
 
 func collectACLEntries(path string) ([]string, error) {
-	if _, err := exec.LookPath("getfacl"); err != nil {
-		return nil, fmt.Errorf("%w: getfacl not found", ErrACLToolingUnavailable)
-	}
-
-	cmd := exec.Command("getfacl", "--absolute-names", "--omit-header", path) // #nosec G204
-	output, err := cmd.CombinedOutput()
+	access, err := readACLXAttr(path, aclxattr.XAttrAccess)
 	if err != nil {
-		msg := strings.TrimSpace(string(output))
-		if msg == "" {
-			msg = err.Error()
-		}
-
-		switch {
-		case strings.Contains(msg, "Operation not supported"):
-			return nil, fmt.Errorf("%w for `%s`: %s", ErrACLCollectionUnsupported, path, msg)
-		default:
-			return nil, fmt.Errorf("failed to collect ACL for `%s`: %s", path, msg)
-		}
+		return nil, err
 	}
 
-	lines := bytes.Split(output, []byte{'\n'})
-	entries := make([]string, 0, len(lines))
-	for _, line := range lines {
-		entry := strings.TrimSpace(string(line))
-		if entry == "" {
-			continue
-		}
-
-		if strings.HasPrefix(entry, "#") {
-			continue
-		}
-
-		entries = append(entries, entry)
+	defaults, err := readACLXAttr(path, aclxattr.XAttrDefault)
+	if err != nil {
+		return nil, err
 	}
 
+	entries := aclxattr.FormatTextEntries(access, defaults)
 	sort.Strings(entries)
+
+	return entries, nil
+}
+
+func readACLXAttr(path, name string) ([]aclxattr.Entry, error) {
+	data, err := getXAttr(path, name)
+	if err != nil {
+		switch {
+		case errors.Is(err, unix.ENODATA):
+			return nil, nil
+		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EINVAL):
+			return nil, fmt.Errorf("%w for `%s`: %w", ErrACLCollectionUnsupported, path, err)
+		default:
+			return nil, fmt.Errorf("failed to collect ACL xattr `%s` for `%s`: %w", name, path, err)
+		}
+	}
+
+	entries, err := aclxattr.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ACL xattr `%s` for `%s`: %w", name, path, err)
+	}
 
 	return entries, nil
 }

@@ -40,8 +40,7 @@ type Generator struct {
 	xattrAllowTrustedNamespace  bool
 	xattrAllowSecurityNamespace bool
 
-	aclEntriesGen            ACLGenerator
-	aclCommandBackendEnabled bool
+	aclEntriesGen ACLGenerator
 
 	symlinkProbGen    BooleanGenerator
 	symlinkRelProbGen BooleanGenerator
@@ -181,9 +180,6 @@ func (g *Generator) validateRunConfiguration() error {
 	}
 	if err := g.validateXAttrConfiguration(); err != nil {
 		missing = append(missing, err.Error())
-	}
-	if g.aclEntriesGen != nil && !g.aclCommandBackendEnabled {
-		missing = append(missing, ErrACLConfigurationIncomplete.Error())
 	}
 	if err := validateRunMode(g.runMode); err != nil {
 		missing = append(missing, err.Error())

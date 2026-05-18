@@ -83,11 +83,10 @@ The generator can apply xattrs and ACL metadata for created files and directorie
 - optional namespace opt-in for `trusted.*` and `security.*` via
   `WithTrustedXAttrNamespace(true)` / `WithSecurityXAttrNamespace(true)`
 - ACL entries via `WithACL(...)` or `WithACLGenerator(...)`
-- ACL command backend is explicit opt-in via `WithACLCommandBackend(true)`
 
 Important:
 
 - Linux-only behavior for xattr/ACL metadata controls; non-Linux returns explicit unsupported errors
-- xattr and ACL capability/tooling failures are explicit (permission denied, unsupported filesystem, missing tools)
+- xattr and ACL capability failures are explicit (permission denied, unsupported filesystem)
 - `diff.PathsWithOptions` can now compare xattr and ACL parity deterministically with
   `CompareXAttrs` and `CompareACLs` options
