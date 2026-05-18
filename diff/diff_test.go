@@ -25,6 +25,10 @@ func TestRandomTree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(pathA, "sub", "file2.txt"), []byte("other content"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(pathB, "sub", "file2.txt"), []byte("other content"), 0o600))
 
+	ts := time.Unix(1_700_000_000, 0)
+	require.NoError(t, normalizeTreeMTime(pathA, ts))
+	require.NoError(t, normalizeTreeMTime(pathB, ts))
+
 	require.NoError(t, Paths(pathA, pathB))
 }
 
@@ -501,4 +505,18 @@ func findNodeByPath(nodes []Node, path string) (Node, bool) {
 	}
 
 	return Node{}, false
+}
+
+func normalizeTreeMTime(basePath string, ts time.Time) error {
+	return filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+
+		return os.Chtimes(path, ts, ts)
+	})
 }
