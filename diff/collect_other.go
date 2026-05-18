@@ -5,6 +5,10 @@ package diff
 import "fmt"
 
 func collectPlatformMetadata(path string, node *Node, opts Options) error {
+	if opts.CompareSparseness {
+		return fmt.Errorf("%w for `%s`: %w", ErrSparsenessCollectionUnsupported, path, ErrSparsenessMetadataUnavailable)
+	}
+
 	if opts.CompareXAttrs {
 		return fmt.Errorf("%w for `%s`: %w", ErrXAttrCollectionUnsupported, path, ErrXAttrMetadataUnavailable)
 	}
@@ -15,6 +19,7 @@ func collectPlatformMetadata(path string, node *Node, opts Options) error {
 
 	node.HasXAttrs = false
 	node.HasACL = false
+	node.HasAllocatedBlocks = false
 
 	return nil
 }

@@ -30,6 +30,9 @@ type Generator struct {
 	dataGen      DataGenerator
 	pathDepthGen NumberGenerator
 
+	contentPatternGen     ContentPatternGenerator
+	contentLogicalSizeGen NumberGenerator
+
 	ownershipUIDGen NumberGenerator
 	ownershipGIDGen NumberGenerator
 
@@ -123,6 +126,8 @@ func (g *Generator) hasNoConfiguration() bool {
 		g.fileModeGen == nil &&
 		g.dataGen == nil &&
 		g.pathDepthGen == nil &&
+		g.contentPatternGen == nil &&
+		g.contentLogicalSizeGen == nil &&
 		g.ownershipUIDGen == nil &&
 		g.ownershipGIDGen == nil &&
 		g.atimeGen == nil &&
@@ -169,8 +174,11 @@ func (g *Generator) validateRunConfiguration() error {
 	if g.fileModeGen == nil {
 		missing = append(missing, "file mode generator")
 	}
-	if g.dataGen == nil {
+	if g.dataGen == nil && g.contentPatternGen == nil {
 		missing = append(missing, "data generator")
+	}
+	if (g.contentPatternGen == nil) != (g.contentLogicalSizeGen == nil) {
+		missing = append(missing, ErrContentPatternConfigurationIncomplete.Error())
 	}
 	if g.pathDepthGen == nil {
 		missing = append(missing, "path depth generator")
@@ -229,6 +237,10 @@ func (g *Generator) nextSpecialFileType(r *rand.Rand) SpecialFileType {
 	}
 
 	return g.specialFileTypeGen(r)
+}
+
+func (g *Generator) hasContentPatternConfiguration() bool {
+	return g.contentPatternGen != nil && g.contentLogicalSizeGen != nil
 }
 
 func (g *Generator) hasExplicitSymlinkStrategy() bool {
