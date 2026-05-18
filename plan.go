@@ -24,6 +24,7 @@ const (
 	plannedEntryTypeFile
 	plannedEntryTypeSymlink
 	plannedEntryTypeHardlink
+	plannedEntryTypeSpecial
 )
 
 type plannedEntry struct {
@@ -34,6 +35,11 @@ type plannedEntry struct {
 	data []byte
 
 	linkTarget string
+
+	specialFileType SpecialFileType
+
+	specialDeviceMajor int
+	specialDeviceMinor int
 
 	metadata metadataConfig
 }
@@ -128,6 +134,14 @@ func (g *Generator) planDir(path string, depth int, state *planState, plan *runP
 			return err
 		}
 		if plannedHardlink {
+			continue
+		}
+
+		plannedSpecial, err := g.tryPlanSpecialFile(path, state, plan)
+		if err != nil {
+			return err
+		}
+		if plannedSpecial {
 			continue
 		}
 
@@ -300,6 +314,50 @@ func (g *Generator) tryPlanHardlink(dir string, state *planState, plan *runPlan)
 	state.registerFilePath(hardlinkPath)
 	state.lastPath = hardlinkPath
 	state.registerHardlink(targetPath, hardlinkPath)
+
+	return true, nil
+}
+
+func (g *Generator) tryPlanSpecialFile(dir string, state *planState, plan *runPlan) (bool, error) {
+	if !g.shouldPlanSpecialFile(state.rnd) {
+		return false, nil
+	}
+
+	fileType := g.nextSpecialFileType(state.rnd)
+	if err := validateSpecialFileType(fileType); err != nil {
+		return false, fmt.Errorf("invalid configured special file type: %w", err)
+	}
+
+	path, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "special file")
+	if err != nil {
+		return false, err
+	}
+
+	entry := plannedEntry{
+		typeID:          plannedEntryTypeSpecial,
+		path:            path,
+		mode:            g.fileModeGen(state.rnd),
+		specialFileType: fileType,
+	}
+
+	if isSpecialDeviceType(fileType) {
+		if g.specialDeviceMajorGen == nil || g.specialDeviceMinorGen == nil {
+			return false, ErrSpecialDeviceNumbersRequired
+		}
+
+		entry.specialDeviceMajor = g.specialDeviceMajorGen(state.rnd)
+		entry.specialDeviceMinor = g.specialDeviceMinorGen(state.rnd)
+
+		if entry.specialDeviceMajor < 0 {
+			return false, fmt.Errorf("special device major must be >= 0, got %d", entry.specialDeviceMajor)
+		}
+		if entry.specialDeviceMinor < 0 {
+			return false, fmt.Errorf("special device minor must be >= 0, got %d", entry.specialDeviceMinor)
+		}
+	}
+
+	plan.entries = append(plan.entries, entry)
+	state.lastPath = path
 
 	return true, nil
 }
@@ -530,6 +588,14 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 			if !info.Mode().IsRegular() {
 				return false, fmt.Errorf("planned hardlink path `%s` already exists as non-regular file", entry.path)
 			}
+		case plannedEntryTypeSpecial:
+			if !matchesSpecialFileType(info.Mode(), entry.specialFileType) {
+				return false, fmt.Errorf(
+					"planned special file path `%s` already exists as incompatible type (expected %s)",
+					entry.path,
+					entry.specialFileType,
+				)
+			}
 		default:
 			return false, fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
 		}
@@ -560,9 +626,34 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 		if err := os.Link(entry.linkTarget, entry.path); err != nil {
 			return false, fmt.Errorf("failed to create planned hardlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
 		}
+	case plannedEntryTypeSpecial:
+		if err := createPlannedSpecialFile(
+			entry.path,
+			entry.specialFileType,
+			entry.mode,
+			entry.specialDeviceMajor,
+			entry.specialDeviceMinor,
+		); err != nil {
+			return false, err
+		}
 	default:
 		return false, fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
 	}
 
 	return true, nil
+}
+
+func matchesSpecialFileType(mode fs.FileMode, fileType SpecialFileType) bool {
+	switch fileType {
+	case SpecialFileTypeFIFO:
+		return mode&os.ModeNamedPipe != 0
+	case SpecialFileTypeSocket:
+		return mode&os.ModeSocket != 0
+	case SpecialFileTypeCharDevice:
+		return mode&os.ModeDevice != 0 && mode&os.ModeCharDevice != 0
+	case SpecialFileTypeBlockDevice:
+		return mode&os.ModeDevice != 0 && mode&os.ModeCharDevice == 0
+	default:
+		return false
+	}
 }

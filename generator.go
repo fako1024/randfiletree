@@ -42,11 +42,16 @@ type Generator struct {
 
 	aclEntriesGen ACLGenerator
 
-	symlinkProbGen    BooleanGenerator
-	symlinkRelProbGen BooleanGenerator
-	hardlinkProbGen   BooleanGenerator
+	symlinkProbGen     BooleanGenerator
+	symlinkRelProbGen  BooleanGenerator
+	hardlinkProbGen    BooleanGenerator
+	specialFileProbGen BooleanGenerator
 
 	symlinkStrategyGen SymlinkStrategyGenerator
+	specialFileTypeGen SpecialFileTypeGenerator
+
+	specialDeviceMajorGen NumberGenerator
+	specialDeviceMinorGen NumberGenerator
 
 	rndSrc  *rand.Rand
 	runMode RunMode
@@ -125,7 +130,11 @@ func (g *Generator) hasNoConfiguration() bool {
 		g.symlinkProbGen == nil &&
 		g.symlinkRelProbGen == nil &&
 		g.hardlinkProbGen == nil &&
+		g.specialFileProbGen == nil &&
 		g.symlinkStrategyGen == nil &&
+		g.specialFileTypeGen == nil &&
+		g.specialDeviceMajorGen == nil &&
+		g.specialDeviceMinorGen == nil &&
 		len(g.xattrValueGens) == 0 &&
 		g.aclEntriesGen == nil
 }
@@ -178,6 +187,12 @@ func (g *Generator) validateRunConfiguration() error {
 	if g.symlinkRelProbGen == nil && g.symlinkStrategyGen == nil {
 		missing = append(missing, "relative symlink generator or symlink strategy generator")
 	}
+	if (g.specialFileProbGen == nil) != (g.specialFileTypeGen == nil) {
+		missing = append(missing, "special file generator and special file type generator")
+	}
+	if (g.specialDeviceMajorGen == nil) != (g.specialDeviceMinorGen == nil) {
+		missing = append(missing, ErrSpecialDeviceConfigurationIncomplete.Error())
+	}
 	if err := g.validateXAttrConfiguration(); err != nil {
 		missing = append(missing, err.Error())
 	}
@@ -198,6 +213,22 @@ func (g *Generator) shouldPlanHardlink(r *rand.Rand) bool {
 	}
 
 	return g.hardlinkProbGen(r)
+}
+
+func (g *Generator) shouldPlanSpecialFile(r *rand.Rand) bool {
+	if g.specialFileProbGen == nil {
+		return false
+	}
+
+	return g.specialFileProbGen(r)
+}
+
+func (g *Generator) nextSpecialFileType(r *rand.Rand) SpecialFileType {
+	if g.specialFileTypeGen == nil {
+		return 0
+	}
+
+	return g.specialFileTypeGen(r)
 }
 
 func (g *Generator) hasExplicitSymlinkStrategy() bool {

@@ -229,6 +229,51 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			},
 		},
 		{
+			name: "WithSpecialFileGenerator",
+			option: WithSpecialFileGenerator(func(r *rand.Rand) bool {
+				return true
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				require.True(t, g.specialFileProbGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithSpecialFileTypeGenerator",
+			option: WithSpecialFileTypeGenerator(func(r *rand.Rand) SpecialFileType {
+				return SpecialFileTypeSocket
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, SpecialFileTypeSocket, g.specialFileTypeGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithSpecialFileTypeProbabilities",
+			option: WithSpecialFileTypeProbabilities(map[SpecialFileType]float64{
+				SpecialFileTypeFIFO: 1,
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				for i := 0; i < 16; i++ {
+					require.Equal(t, SpecialFileTypeFIFO, g.specialFileTypeGen(g.rndSrc))
+				}
+			},
+		},
+		{
+			name:   "WithSpecialDeviceNumberGenerators",
+			option: WithSpecialDeviceNumberGenerators(NumberGeneratorConstant(7), NumberGeneratorConstant(9)),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 7, g.specialDeviceMajorGen(g.rndSrc))
+				require.Equal(t, 9, g.specialDeviceMinorGen(g.rndSrc))
+			},
+		},
+		{
+			name:   "WithSpecialDeviceNumbers",
+			option: WithSpecialDeviceNumbers(11, 13),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 11, g.specialDeviceMajorGen(g.rndSrc))
+				require.Equal(t, 13, g.specialDeviceMinorGen(g.rndSrc))
+			},
+		},
+		{
 			name: "WithSymlinkStrategyGenerator",
 			option: WithSymlinkStrategyGenerator(func(r *rand.Rand) SymlinkStrategy {
 				return SymlinkStrategyDangling
@@ -261,6 +306,15 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			assert: func(t *testing.T, g *Generator) {
 				for i := 0; i < 16; i++ {
 					require.True(t, g.hardlinkProbGen(g.rndSrc))
+				}
+			},
+		},
+		{
+			name:   "WithSpecialFileProbability",
+			option: WithSpecialFileProbability(1),
+			assert: func(t *testing.T, g *Generator) {
+				for i := 0; i < 16; i++ {
+					require.True(t, g.specialFileProbGen(g.rndSrc))
 				}
 			},
 		},
@@ -455,6 +509,36 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			errContains: "hardlink generator must not be nil",
 		},
 		{
+			name:        "NilSpecialFileGenerator",
+			option:      WithSpecialFileGenerator(nil),
+			errContains: "special file generator must not be nil",
+		},
+		{
+			name:        "NilSpecialFileTypeGenerator",
+			option:      WithSpecialFileTypeGenerator(nil),
+			errContains: "special file type generator must not be nil",
+		},
+		{
+			name:        "NilSpecialDeviceMajorGenerator",
+			option:      WithSpecialDeviceNumberGenerators(nil, NumberGeneratorConstant(1)),
+			errContains: "special device major generator must not be nil",
+		},
+		{
+			name:        "NilSpecialDeviceMinorGenerator",
+			option:      WithSpecialDeviceNumberGenerators(NumberGeneratorConstant(1), nil),
+			errContains: "special device minor generator must not be nil",
+		},
+		{
+			name:        "NegativeSpecialDeviceMajor",
+			option:      WithSpecialDeviceNumbers(-1, 1),
+			errContains: "special device major must be >= 0",
+		},
+		{
+			name:        "NegativeSpecialDeviceMinor",
+			option:      WithSpecialDeviceNumbers(1, -1),
+			errContains: "special device minor must be >= 0",
+		},
+		{
 			name:        "NilSymlinkStrategyGenerator",
 			option:      WithSymlinkStrategyGenerator(nil),
 			errContains: "symlink strategy generator must not be nil",
@@ -483,6 +567,42 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			name:        "InfiniteHardlinkProbability",
 			option:      WithHardlinkProbability(math.Inf(1)),
 			errContains: "hardlink probability must be finite",
+		},
+		{
+			name:        "TooLargeSpecialFileProbability",
+			option:      WithSpecialFileProbability(1.1),
+			errContains: "special file probability must be within [0, 1]",
+		},
+		{
+			name:        "NaNSpecialFileProbability",
+			option:      WithSpecialFileProbability(math.NaN()),
+			errContains: "special file probability must not be NaN",
+		},
+		{
+			name:        "EmptySpecialFileTypeProbabilities",
+			option:      WithSpecialFileTypeProbabilities(map[SpecialFileType]float64{}),
+			errContains: "special file type probabilities must not be empty",
+		},
+		{
+			name: "InvalidSpecialFileTypeProbabilities",
+			option: WithSpecialFileTypeProbabilities(map[SpecialFileType]float64{
+				SpecialFileType(255): 1,
+			}),
+			errContains: "invalid special file type",
+		},
+		{
+			name: "NegativeSpecialFileTypeProbabilities",
+			option: WithSpecialFileTypeProbabilities(map[SpecialFileType]float64{
+				SpecialFileTypeFIFO: -0.1,
+			}),
+			errContains: "must be >= 0",
+		},
+		{
+			name: "ZeroSpecialFileTypeProbabilities",
+			option: WithSpecialFileTypeProbabilities(map[SpecialFileType]float64{
+				SpecialFileTypeFIFO: 0,
+			}),
+			errContains: "sum of special file type probabilities must be > 0",
 		},
 		{
 			name:        "EmptySymlinkStrategyProbabilities",
@@ -599,6 +719,18 @@ func TestValidateSymlinkStrategyProbabilitiesSentinelErrors(t *testing.T) {
 		SymlinkStrategyRelative: 0,
 	})
 	require.ErrorIs(t, err, ErrSymlinkStrategyProbabilitiesNonPositive)
+}
+
+func TestValidateSpecialFileTypeProbabilitiesSentinelErrors(t *testing.T) {
+	t.Parallel()
+
+	err := validateSpecialFileTypeProbabilities(map[SpecialFileType]float64{})
+	require.ErrorIs(t, err, ErrSpecialFileTypeProbabilitiesEmpty)
+
+	err = validateSpecialFileTypeProbabilities(map[SpecialFileType]float64{
+		SpecialFileTypeFIFO: 0,
+	})
+	require.ErrorIs(t, err, ErrSpecialFileTypeProbabilitiesNonPositive)
 }
 
 func TestValidateXAttrNameAndACLEntries(t *testing.T) {

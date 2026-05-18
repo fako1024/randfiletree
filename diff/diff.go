@@ -86,15 +86,19 @@ type projectedNode struct {
 	Path       string
 	LinkTarget string
 
-	Size    int64
-	Mode    uint32
-	ModTime int64
-	Atime   int64
+	Size      int64
+	Mode      uint32
+	InodeType InodeType
+	ModTime   int64
+	Atime     int64
 
 	Hash []byte
 
 	UID uint32
 	GID uint32
+
+	DeviceMajor uint32
+	DeviceMinor uint32
 }
 
 func projectNodes(nodes []Node, opts Options) []projectedNode {
@@ -106,6 +110,7 @@ func projectNodes(nodes []Node, opts Options) []projectedNode {
 			LinkTarget: node.LinkTarget,
 			Size:       node.Size,
 			Mode:       uint32(node.Mode),
+			InodeType:  node.InodeType,
 			ModTime:    node.ModTime,
 			Atime:      node.Atime,
 		}
@@ -122,6 +127,11 @@ func projectNodes(nodes []Node, opts Options) []projectedNode {
 		if opts.CompareOwnership {
 			projectedNode.UID = node.UID
 			projectedNode.GID = node.GID
+		}
+
+		if node.InodeType == InodeTypeCharDevice || node.InodeType == InodeTypeBlockDevice {
+			projectedNode.DeviceMajor = node.DeviceMajor
+			projectedNode.DeviceMinor = node.DeviceMinor
 		}
 
 		if !opts.CompareAccessTime {
