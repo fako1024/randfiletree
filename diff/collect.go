@@ -40,6 +40,7 @@ func collectPaths(basePath string, opts Options) (result collectedPaths, err err
 			Mode:        info.Mode(),
 			ModTime:     info.ModTime().Unix(),
 			ModTimeNsec: info.ModTime().UnixNano(),
+			InodeType:   inodeTypeFromFileMode(info.Mode()),
 		}
 
 		if node.Path == "" {
@@ -147,4 +148,25 @@ func hashFile(file string, hashKey []byte) ([]byte, error) {
 
 	_, err = io.Copy(hash, f)
 	return hash.Sum(nil), err
+}
+
+func inodeTypeFromFileMode(mode fs.FileMode) InodeType {
+	switch {
+	case mode.IsRegular():
+		return InodeTypeRegular
+	case mode.IsDir():
+		return InodeTypeDirectory
+	case mode&fs.ModeSymlink != 0:
+		return InodeTypeSymlink
+	case mode&fs.ModeNamedPipe != 0:
+		return InodeTypeFIFO
+	case mode&fs.ModeSocket != 0:
+		return InodeTypeSocket
+	case mode&fs.ModeDevice != 0 && mode&fs.ModeCharDevice != 0:
+		return InodeTypeCharDevice
+	case mode&fs.ModeDevice != 0:
+		return InodeTypeBlockDevice
+	default:
+		return InodeTypeOther
+	}
 }
