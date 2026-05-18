@@ -21,6 +21,18 @@ type Node struct {
 	GID           uint32
 	HasOwnership  bool
 	HasAccessTime bool
+
+	XAttrs    []XAttr
+	HasXAttrs bool
+
+	ACLEntries []string
+	HasACL     bool
+}
+
+// XAttr denotes a single extended attribute name/value pair.
+type XAttr struct {
+	Name  string
+	Value []byte
 }
 
 type collectedPaths struct {

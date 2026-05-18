@@ -37,6 +37,14 @@ func PathsWithOptions(a, b string, opts Options) error {
 		return err
 	}
 
+	if err := ensureXAttrMetadata(pathsA.nodes, pathsB.nodes, opts); err != nil {
+		return err
+	}
+
+	if err := ensureACLMetadata(pathsA.nodes, pathsB.nodes, opts); err != nil {
+		return err
+	}
+
 	if diff := cmp.Diff(projectNodes(pathsA.nodes, opts), projectNodes(pathsB.nodes, opts)); diff != "" {
 		return fmt.Errorf("mismatch (-want +got):\n%s", diff)
 	}
@@ -133,14 +141,26 @@ func runMetadataHooks(nodesA, nodesB []Node, opts Options) error {
 
 	for i := range nodesA {
 		if opts.CompareXAttrs {
-			if err := opts.XAttrComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
-				return fmt.Errorf("xattr mismatch for path `%s`: %w", nodesA[i].Path, err)
+			if diff := cmp.Diff(nodesA[i].XAttrs, nodesB[i].XAttrs); diff != "" {
+				return fmt.Errorf("xattr mismatch for path `%s` (-want +got):\n%s", nodesA[i].Path, diff)
+			}
+
+			if opts.XAttrComparator != nil {
+				if err := opts.XAttrComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
+					return fmt.Errorf("xattr mismatch for path `%s`: %w", nodesA[i].Path, err)
+				}
 			}
 		}
 
 		if opts.CompareACLs {
-			if err := opts.ACLComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
-				return fmt.Errorf("ACL mismatch for path `%s`: %w", nodesA[i].Path, err)
+			if diff := cmp.Diff(nodesA[i].ACLEntries, nodesB[i].ACLEntries); diff != "" {
+				return fmt.Errorf("ACL mismatch for path `%s` (-want +got):\n%s", nodesA[i].Path, diff)
+			}
+
+			if opts.ACLComparator != nil {
+				if err := opts.ACLComparator(nodesA[i].Path, nodesA[i], nodesB[i]); err != nil {
+					return fmt.Errorf("ACL mismatch for path `%s`: %w", nodesA[i].Path, err)
+				}
 			}
 		}
 	}
@@ -162,6 +182,46 @@ func ensureAccessTimeMetadata(nodesA, nodesB []Node, opts Options) error {
 	for _, node := range nodesB {
 		if !node.HasAccessTime {
 			return fmt.Errorf("access-time comparison requested but metadata unavailable for right path `%s`", node.Path)
+		}
+	}
+
+	return nil
+}
+
+func ensureXAttrMetadata(nodesA, nodesB []Node, opts Options) error {
+	if !opts.CompareXAttrs {
+		return nil
+	}
+
+	for _, node := range nodesA {
+		if !node.HasXAttrs {
+			return fmt.Errorf("%w for left path `%s`", ErrXAttrMetadataUnavailable, node.Path)
+		}
+	}
+
+	for _, node := range nodesB {
+		if !node.HasXAttrs {
+			return fmt.Errorf("%w for right path `%s`", ErrXAttrMetadataUnavailable, node.Path)
+		}
+	}
+
+	return nil
+}
+
+func ensureACLMetadata(nodesA, nodesB []Node, opts Options) error {
+	if !opts.CompareACLs {
+		return nil
+	}
+
+	for _, node := range nodesA {
+		if !node.HasACL {
+			return fmt.Errorf("%w for left path `%s`", ErrACLMetadataUnavailable, node.Path)
+		}
+	}
+
+	for _, node := range nodesB {
+		if !node.HasACL {
+			return fmt.Errorf("%w for right path `%s`", ErrACLMetadataUnavailable, node.Path)
 		}
 	}
 

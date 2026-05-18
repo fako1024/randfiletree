@@ -70,7 +70,24 @@ Important:
   with `ParseOperationSpec(spec)`.
 
 Supported operation kinds include create (file/dir/symlink/hardlink), delete,
-rename, chmod/chown, truncate, append, overwrite-range, and xattr placeholders.
+rename, chmod/chown, truncate, append, overwrite-range, set-xattr, and remove-xattr.
 
-`set-xattr` and `remove-xattr` are currently placeholders and return
-`ErrXAttrPlaceholderUnsupported` when applied.
+`set-xattr` and `remove-xattr` are fully supported on Linux and return explicit
+unsupported errors on non-Linux platforms.
+
+## Linux XAttr and ACL Metadata
+
+The generator can apply xattrs and ACL metadata for created files and directories on Linux.
+
+- xattrs via `WithXAttr(...)`, `WithXAttrsFixed(...)`, or `WithXAttrValueGenerator(...)`
+- optional namespace opt-in for `trusted.*` and `security.*` via
+  `WithTrustedXAttrNamespace(true)` / `WithSecurityXAttrNamespace(true)`
+- ACL entries via `WithACL(...)` or `WithACLGenerator(...)`
+- ACL command backend is explicit opt-in via `WithACLCommandBackend(true)`
+
+Important:
+
+- Linux-only behavior for xattr/ACL metadata controls; non-Linux returns explicit unsupported errors
+- xattr and ACL capability/tooling failures are explicit (permission denied, unsupported filesystem, missing tools)
+- `diff.PathsWithOptions` can now compare xattr and ACL parity deterministically with
+  `CompareXAttrs` and `CompareACLs` options
