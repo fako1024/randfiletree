@@ -32,12 +32,31 @@ Supported symlink strategies:
 
 `diff.Paths` validates both symlink target parity and hardlink topology parity.
 
+## Linux Special Inode Generation
+
+The generator supports Linux special inode scenarios to model realistic backup/restore inputs:
+
+- global special-file probability via `WithSpecialFileGenerator(...)` or
+  `WithSpecialFileProbability(...)`
+- special-file type selection via `WithSpecialFileTypeGenerator(...)` or weighted
+  `WithSpecialFileTypeProbabilities(...)`
+- supported special types: FIFO, Unix socket path, char device, block device
+- deterministic device numbers for char/block devices via
+  `WithSpecialDeviceNumbers(...)` / `WithSpecialDeviceNumberGenerators(...)`
+
+Important:
+
+- special inode generation is Linux-only and returns explicit unsupported errors elsewhere
+- char/block device creation may require elevated privileges (`mknod` capability/root)
+- if char/block generation is selected, major and minor generators must both be configured
+
 For configurable strictness, use `diff.PathsWithOptions`:
 
 - `diff.DefaultOptions()` keeps compatibility with `diff.Paths`.
 - `diff.StrictLinuxOptions()` enables ownership, access-time, and nanosecond timestamp checks.
 - `Options` can independently toggle content hash, timestamp precision,
   ownership, access-time, hardlink topology, and future xattr/ACL comparator hooks.
+- diff now includes inode-type parity, and for char/block devices compares major/minor numbers.
 
 ## Linux Metadata Controls
 

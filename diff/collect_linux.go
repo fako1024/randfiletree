@@ -26,6 +26,12 @@ func collectPlatformMetadata(path string, node *Node, opts Options) error {
 	node.HasAccessTime = true
 	node.ModTimeNsec = unix.TimespecToNsec(stat.Mtim)
 
+	if node.InodeType == InodeTypeCharDevice || node.InodeType == InodeTypeBlockDevice {
+		node.DeviceMajor = unix.Major(uint64(stat.Rdev))
+		node.DeviceMinor = unix.Minor(uint64(stat.Rdev))
+		node.HasDeviceNumbers = true
+	}
+
 	if opts.CompareXAttrs {
 		xattrs, err := collectXAttrs(path)
 		if err != nil {

@@ -9,6 +9,15 @@ var (
 	ErrSymlinkStrategyProbabilitiesEmpty       = errors.New("symlink strategy probabilities must not be empty")
 	ErrSymlinkStrategyProbabilitiesNonPositive = errors.New("sum of symlink strategy probabilities must be > 0")
 
+	ErrSpecialFileTypeProbabilitiesEmpty       = errors.New("special file type probabilities must not be empty")
+	ErrSpecialFileTypeProbabilitiesNonPositive = errors.New("sum of special file type probabilities must be > 0")
+	ErrSpecialDeviceConfigurationIncomplete    = errors.New("special device configuration requires both major and minor generators")
+	ErrSpecialDeviceNumbersRequired            = errors.New("special device generation requires major and minor number generators")
+
+	ErrSpecialFilePermissionDenied = errors.New("insufficient privileges to create requested special file")
+	ErrSpecialFileUnsupported      = errors.New("special file generation is unsupported on this filesystem or platform")
+	ErrSpecialFileLinuxOnly        = errors.New("special file generation is only supported on linux")
+
 	ErrOwnershipMetadataConfigurationIncomplete = errors.New("ownership metadata configuration requires both uid and gid generators")
 	ErrTimestampMetadataConfigurationIncomplete = errors.New("timestamp metadata configuration requires both atime and mtime generators")
 
