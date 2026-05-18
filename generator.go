@@ -56,6 +56,9 @@ type Generator struct {
 	specialDeviceMajorGen NumberGenerator
 	specialDeviceMinorGen NumberGenerator
 
+	byteFileNameGen ByteNameGenerator
+	byteDirNameGen  ByteNameGenerator
+
 	rndSrc  *rand.Rand
 	runMode RunMode
 }
@@ -140,6 +143,8 @@ func (g *Generator) hasNoConfiguration() bool {
 		g.specialFileTypeGen == nil &&
 		g.specialDeviceMajorGen == nil &&
 		g.specialDeviceMinorGen == nil &&
+		g.byteFileNameGen == nil &&
+		g.byteDirNameGen == nil &&
 		len(g.xattrValueGens) == 0 &&
 		g.aclEntriesGen == nil
 }
@@ -150,7 +155,7 @@ func (g *Generator) validateRunConfiguration() error {
 	if g.rndSrc == nil {
 		missing = append(missing, "random source")
 	}
-	if g.dirNameGen == nil {
+	if g.dirNameGen == nil && g.byteDirNameGen == nil {
 		missing = append(missing, "directory name generator")
 	}
 	if g.dirNameLenGen == nil {
@@ -165,7 +170,7 @@ func (g *Generator) validateRunConfiguration() error {
 	if g.nDirsInDirGen == nil {
 		missing = append(missing, "directories-per-directory generator")
 	}
-	if g.fileNameGen == nil {
+	if g.fileNameGen == nil && g.byteFileNameGen == nil {
 		missing = append(missing, "file name generator")
 	}
 	if g.fileNameLenGen == nil {
