@@ -78,6 +78,34 @@ Important:
 - `ctime` cannot be set directly from user space and is intentionally not
   configurable
 
+## Sparse and Large File Content Patterns
+
+The generator supports deterministic content pattern strategies for large files:
+
+- pattern selection via `WithContentPattern(...)`,
+  `WithContentPatternGenerator(...)`, or weighted
+  `WithContentPatternProbabilities(...)`
+- logical file sizes via `WithContentLogicalSize(...)`,
+  `WithContentLogicalSizeGenerator(...)`, or `WithContentLogicalSizeRange(...)`
+- supported patterns:
+  - `ContentPatternDenseRandom`
+  - `ContentPatternSparseHoles`
+  - `ContentPatternRepeatedBlocks`
+  - `ContentPatternPartialRangeOverwrite`
+
+Important:
+
+- content-pattern mode requires both a pattern generator and a logical-size
+  generator
+- large logical files are written in bounded chunks; full-file in-memory buffers
+  are avoided
+- repeated-block pattern reuses `WithDataGenerator(...)` output as the repeated
+  block when configured
+- sparse parity checks are available in diff via
+  `diff.Options{CompareSparseness: true}` and compare sparse-vs-dense parity,
+  not exact allocated block counts, to reduce filesystem noise
+- sparseness comparison currently requires Linux metadata collection
+
 ## Mutation Engine
 
 `randfiletree` supports deterministic mutation streams for multi-snapshot tests.

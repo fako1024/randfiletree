@@ -162,6 +162,91 @@ func WithDataGenerator(gen DataGenerator) Option {
 	}
 }
 
+// WithContentPatternGenerator sets the generator used for file content patterns.
+func WithContentPatternGenerator(gen ContentPatternGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateContentPatternGenerator("content pattern generator", gen); err != nil {
+			return err
+		}
+
+		g.contentPatternGen = gen
+
+		return nil
+	}
+}
+
+// WithContentPattern sets a fixed content pattern.
+func WithContentPattern(pattern ContentPattern) Option {
+	return func(g *Generator) error {
+		if err := validateContentPattern(pattern); err != nil {
+			return err
+		}
+
+		g.contentPatternGen = func(r *rand.Rand) ContentPattern {
+			return pattern
+		}
+
+		return nil
+	}
+}
+
+// WithContentPatternProbabilities sets weighted content pattern probabilities.
+func WithContentPatternProbabilities(probabilities map[ContentPattern]float64) Option {
+	return func(g *Generator) error {
+		if err := validateContentPatternProbabilities(probabilities); err != nil {
+			return err
+		}
+
+		copyProbabilities := make(map[ContentPattern]float64, len(probabilities))
+		for pattern, probability := range probabilities {
+			copyProbabilities[pattern] = probability
+		}
+
+		g.contentPatternGen = ContentPatternGeneratorProbabilityWeighted(copyProbabilities)
+
+		return nil
+	}
+}
+
+// WithContentLogicalSizeGenerator sets the generator used for logical file sizes with content patterns.
+func WithContentLogicalSizeGenerator(gen NumberGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateNumberGenerator("content logical size generator", gen); err != nil {
+			return err
+		}
+
+		g.contentLogicalSizeGen = gen
+
+		return nil
+	}
+}
+
+// WithContentLogicalSize sets a fixed logical file size with content patterns.
+func WithContentLogicalSize(size int) Option {
+	return func(g *Generator) error {
+		if size < 0 {
+			return fmt.Errorf("content logical size must be >= 0, got %d", size)
+		}
+
+		g.contentLogicalSizeGen = NumberGeneratorConstant(size)
+
+		return nil
+	}
+}
+
+// WithContentLogicalSizeRange sets a random flat logical file size generator in the range [min, max).
+func WithContentLogicalSizeRange(min, max int) Option {
+	return func(g *Generator) error {
+		if err := validateContentLogicalSizeRange("content logical size range", min, max); err != nil {
+			return err
+		}
+
+		g.contentLogicalSizeGen = NumberGeneratorRandomFlat(min, max)
+
+		return nil
+	}
+}
+
 // WithPathDepthGenerator sets the generator used for path depth.
 func WithPathDepthGenerator(gen NumberGenerator) Option {
 	return func(g *Generator) error {
@@ -679,6 +764,14 @@ func validateSymlinkStrategyGenerator(name string, gen SymlinkStrategyGenerator)
 	return nil
 }
 
+func validateContentPatternGenerator(name string, gen ContentPatternGenerator) error {
+	if gen == nil {
+		return fmt.Errorf("%s must not be nil", name)
+	}
+
+	return nil
+}
+
 func validateTimestampGenerator(name string, gen TimestampGenerator) error {
 	if gen == nil {
 		return fmt.Errorf("%s must not be nil", name)
@@ -752,6 +845,51 @@ func validateSpecialFileTypeProbabilities(probabilities map[SpecialFileType]floa
 
 	if total <= 0 {
 		return ErrSpecialFileTypeProbabilitiesNonPositive
+	}
+
+	return nil
+}
+
+func validateContentPatternProbabilities(probabilities map[ContentPattern]float64) error {
+	if len(probabilities) == 0 {
+		return ErrContentPatternProbabilitiesEmpty
+	}
+
+	total := 0.0
+	for pattern, probability := range probabilities {
+		if err := validateContentPattern(pattern); err != nil {
+			return err
+		}
+
+		if math.IsNaN(probability) {
+			return fmt.Errorf("content pattern probability for %s must not be NaN", pattern)
+		}
+		if math.IsInf(probability, 0) {
+			return fmt.Errorf("content pattern probability for %s must be finite", pattern)
+		}
+		if probability < 0 {
+			return fmt.Errorf("content pattern probability for %s must be >= 0, got %v", pattern, probability)
+		}
+
+		total += probability
+	}
+
+	if total <= 0 {
+		return ErrContentPatternProbabilitiesNonPositive
+	}
+
+	return nil
+}
+
+func validateContentLogicalSizeRange(name string, min, max int) error {
+	if min < 0 {
+		return fmt.Errorf("%s minimum must be >= 0, got %d", name, min)
+	}
+	if max < 0 {
+		return fmt.Errorf("%s maximum must be >= 0, got %d", name, max)
+	}
+	if max <= min {
+		return fmt.Errorf("%s maximum must be > minimum, got min=%d max=%d", name, min, max)
 	}
 
 	return nil
