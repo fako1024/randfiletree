@@ -130,10 +130,15 @@ func requireXAttrSupport(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, []byte("x"), 0o600))
 
 	if err := unix.Lsetxattr(filePath, "user.probe", []byte("v"), 0); err != nil {
-		t.Skipf("xattr not supported in this test environment: %s", err)
+		if errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EINVAL) {
+			t.Skipf("xattr not supported in this test environment: %s", err)
+		}
+		t.Skipf("xattr probe failed in this test environment: %s", err)
 	}
 
-	require.NoError(t, unix.Lremovexattr(filePath, "user.probe"))
+	if err := unix.Lremovexattr(filePath, "user.probe"); err != nil {
+		t.Skipf("xattr remove probe failed in this test environment: %s", err)
+	}
 }
 
 func requireACLTooling(t *testing.T) {
