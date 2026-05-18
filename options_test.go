@@ -104,6 +104,54 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithContentPattern",
+			option: WithContentPattern(ContentPatternSparseHoles),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, ContentPatternSparseHoles, g.contentPatternGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithContentPatternGenerator",
+			option: WithContentPatternGenerator(func(r *rand.Rand) ContentPattern {
+				return ContentPatternPartialRangeOverwrite
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, ContentPatternPartialRangeOverwrite, g.contentPatternGen(g.rndSrc))
+			},
+		},
+		{
+			name: "WithContentPatternProbabilities",
+			option: WithContentPatternProbabilities(map[ContentPattern]float64{
+				ContentPatternRepeatedBlocks: 1,
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				for i := 0; i < 16; i++ {
+					require.Equal(t, ContentPatternRepeatedBlocks, g.contentPatternGen(g.rndSrc))
+				}
+			},
+		},
+		{
+			name:   "WithContentLogicalSize",
+			option: WithContentLogicalSize(512),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 512, g.contentLogicalSizeGen(g.rndSrc))
+			},
+		},
+		{
+			name:   "WithContentLogicalSizeGenerator",
+			option: WithContentLogicalSizeGenerator(NumberGeneratorConstant(1024)),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 1024, g.contentLogicalSizeGen(g.rndSrc))
+			},
+		},
+		{
+			name:   "WithContentLogicalSizeRange",
+			option: WithContentLogicalSizeRange(2048, 2049),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 2048, g.contentLogicalSizeGen(g.rndSrc))
+			},
+		},
+		{
 			name:   "WithPathDepthGenerator",
 			option: WithPathDepthGenerator(NumberGeneratorConstant(4)),
 			assert: func(t *testing.T, g *Generator) {
@@ -444,6 +492,71 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			errContains: "data generator must not be nil",
 		},
 		{
+			name:        "InvalidContentPattern",
+			option:      WithContentPattern(ContentPattern(255)),
+			errContains: "invalid content pattern",
+		},
+		{
+			name:        "NilContentPatternGenerator",
+			option:      WithContentPatternGenerator(nil),
+			errContains: "content pattern generator must not be nil",
+		},
+		{
+			name:        "EmptyContentPatternProbabilities",
+			option:      WithContentPatternProbabilities(map[ContentPattern]float64{}),
+			errContains: "content pattern probabilities must not be empty",
+		},
+		{
+			name: "InvalidContentPatternProbabilities",
+			option: WithContentPatternProbabilities(map[ContentPattern]float64{
+				ContentPattern(255): 1,
+			}),
+			errContains: "invalid content pattern",
+		},
+		{
+			name: "NegativeContentPatternProbabilities",
+			option: WithContentPatternProbabilities(map[ContentPattern]float64{
+				ContentPatternDenseRandom: -0.1,
+			}),
+			errContains: "must be >= 0",
+		},
+		{
+			name: "ZeroContentPatternProbabilities",
+			option: WithContentPatternProbabilities(map[ContentPattern]float64{
+				ContentPatternDenseRandom: 0,
+			}),
+			errContains: "sum of content pattern probabilities must be > 0",
+		},
+		{
+			name: "NaNContentPatternProbabilities",
+			option: WithContentPatternProbabilities(map[ContentPattern]float64{
+				ContentPatternDenseRandom: math.NaN(),
+			}),
+			errContains: "must not be NaN",
+		},
+		{
+			name: "InfiniteContentPatternProbabilities",
+			option: WithContentPatternProbabilities(map[ContentPattern]float64{
+				ContentPatternDenseRandom: math.Inf(1),
+			}),
+			errContains: "must be finite",
+		},
+		{
+			name:        "NilContentLogicalSizeGenerator",
+			option:      WithContentLogicalSizeGenerator(nil),
+			errContains: "content logical size generator must not be nil",
+		},
+		{
+			name:        "NegativeContentLogicalSize",
+			option:      WithContentLogicalSize(-1),
+			errContains: "content logical size must be >= 0",
+		},
+		{
+			name:        "InvalidContentLogicalSizeRange",
+			option:      WithContentLogicalSizeRange(2, 2),
+			errContains: "content logical size range maximum must be > minimum",
+		},
+		{
 			name:        "NilPathDepthGenerator",
 			option:      WithPathDepthGenerator(nil),
 			errContains: "path depth generator must not be nil",
@@ -731,6 +844,18 @@ func TestValidateSpecialFileTypeProbabilitiesSentinelErrors(t *testing.T) {
 		SpecialFileTypeFIFO: 0,
 	})
 	require.ErrorIs(t, err, ErrSpecialFileTypeProbabilitiesNonPositive)
+}
+
+func TestValidateContentPatternProbabilitiesSentinelErrors(t *testing.T) {
+	t.Parallel()
+
+	err := validateContentPatternProbabilities(map[ContentPattern]float64{})
+	require.ErrorIs(t, err, ErrContentPatternProbabilitiesEmpty)
+
+	err = validateContentPatternProbabilities(map[ContentPattern]float64{
+		ContentPatternDenseRandom: 0,
+	})
+	require.ErrorIs(t, err, ErrContentPatternProbabilitiesNonPositive)
 }
 
 func TestValidateXAttrNameAndACLEntries(t *testing.T) {

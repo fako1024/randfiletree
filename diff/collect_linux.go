@@ -26,6 +26,15 @@ func collectPlatformMetadata(path string, node *Node, opts Options) error {
 	node.HasAccessTime = true
 	node.ModTimeNsec = unix.TimespecToNsec(stat.Mtim)
 
+	if node.InodeType == InodeTypeRegular {
+		node.AllocatedBlocks = stat.Blocks
+		node.HasAllocatedBlocks = true
+
+		if stat.Size > 0 {
+			node.SparseParity = stat.Blocks*512 < stat.Size
+		}
+	}
+
 	if node.InodeType == InodeTypeCharDevice || node.InodeType == InodeTypeBlockDevice {
 		node.DeviceMajor = unix.Major(uint64(stat.Rdev))
 		node.DeviceMinor = unix.Minor(uint64(stat.Rdev))
