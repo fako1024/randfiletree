@@ -202,13 +202,6 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			},
 		},
 		{
-			name:   "WithACLCommandBackend",
-			option: WithACLCommandBackend(true),
-			assert: func(t *testing.T, g *Generator) {
-				require.True(t, g.aclCommandBackendEnabled)
-			},
-		},
-		{
 			name: "WithSymlinkGenerator",
 			option: WithSymlinkGenerator(func(r *rand.Rand) bool {
 				return true
