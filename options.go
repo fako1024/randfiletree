@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sort"
 	"time"
 )
 
@@ -231,6 +232,119 @@ func WithTimestamps(atime, mtime time.Time) Option {
 
 		return nil
 	}
+}
+
+// WithXAttrValueGenerator adds or replaces a single xattr value generator.
+func WithXAttrValueGenerator(name string, gen DataGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateDataGenerator("xattr value generator", gen); err != nil {
+			return err
+		}
+
+		normalizedName, err := validateXAttrName(name)
+		if err != nil {
+			return err
+		}
+
+		next := make([]xattrValueGeneratorConfig, 0, len(g.xattrValueGens)+1)
+		replaced := false
+		for _, cfg := range g.xattrValueGens {
+			if cfg.name == normalizedName {
+				next = append(next, xattrValueGeneratorConfig{name: normalizedName, valueGen: gen})
+				replaced = true
+				continue
+			}
+
+			next = append(next, cfg)
+		}
+
+		if !replaced {
+			next = append(next, xattrValueGeneratorConfig{name: normalizedName, valueGen: gen})
+		}
+
+		sort.Slice(next, func(i, j int) bool {
+			return next[i].name < next[j].name
+		})
+
+		g.xattrValueGens = next
+
+		return nil
+	}
+}
+
+// WithXAttr sets a fixed xattr value.
+func WithXAttr(name string, value []byte) Option {
+	return WithXAttrValueGenerator(name, DataGeneratorFixed(cloneBytes(value)))
+}
+
+// WithXAttrsFixed sets a complete fixed xattr map.
+func WithXAttrsFixed(xattrs map[string][]byte) Option {
+	return func(g *Generator) error {
+		if len(xattrs) == 0 {
+			g.xattrValueGens = nil
+			return nil
+		}
+
+		names := make([]string, 0, len(xattrs))
+		for name := range xattrs {
+			normalizedName, err := validateXAttrName(name)
+			if err != nil {
+				return err
+			}
+
+			names = append(names, normalizedName)
+		}
+
+		sort.Strings(names)
+
+		next := make([]xattrValueGeneratorConfig, 0, len(names))
+		for _, name := range names {
+			value := cloneBytes(xattrs[name])
+			next = append(next, xattrValueGeneratorConfig{
+				name:     name,
+				valueGen: DataGeneratorFixed(value),
+			})
+		}
+
+		g.xattrValueGens = next
+
+		return nil
+	}
+}
+
+// WithTrustedXAttrNamespace sets whether trusted.* xattrs are allowed.
+func WithTrustedXAttrNamespace(enabled bool) Option {
+	return func(g *Generator) error {
+		g.xattrAllowTrustedNamespace = enabled
+		return nil
+	}
+}
+
+// WithSecurityXAttrNamespace sets whether security.* xattrs are allowed.
+func WithSecurityXAttrNamespace(enabled bool) Option {
+	return func(g *Generator) error {
+		g.xattrAllowSecurityNamespace = enabled
+		return nil
+	}
+}
+
+// WithACLGenerator sets the ACL entry generator.
+func WithACLGenerator(gen ACLGenerator) Option {
+	return func(g *Generator) error {
+		if gen == nil {
+			return fmt.Errorf("ACL generator must not be nil")
+		}
+
+		g.aclEntriesGen = gen
+
+		return nil
+	}
+}
+
+// WithACL sets fixed ACL entries.
+func WithACL(entries ...string) Option {
+	fixed := append([]string(nil), entries...)
+	return WithACLGenerator(ACLGeneratorFixed(fixed))
 }
 
 // WithSymlinkGenerator sets the generator used to decide whether to create symlinks.

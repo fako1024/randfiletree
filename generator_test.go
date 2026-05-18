@@ -677,3 +677,34 @@ func requireHardlinkSupport(t *testing.T) {
 		t.Skipf("hardlink not supported in this test environment: %s", err)
 	}
 }
+
+func TestRunRejectsXAttrNamespaceWithoutOptIn(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(1),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string { return "dir" }),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string { return "file" }),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(4)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithXAttr("trusted.test", []byte("value")),
+	))
+
+	err := g.Run()
+	require.Error(t, err)
+	require.ErrorContains(t, err, ErrXAttrNamespaceNotAllowed.Error())
+	_, statErr := os.Stat(base)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}

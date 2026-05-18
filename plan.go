@@ -90,8 +90,16 @@ func (g *Generator) planDir(path string, depth int, state *planState, plan *runP
 		typeID:   plannedEntryTypeDir,
 		path:     path,
 		mode:     g.dirModeGen(state.rnd),
-		metadata: g.resolveMetadata(state.rnd),
+		metadata: metadataConfig{},
 	})
+	entryIndex := len(plan.entries) - 1
+
+	metadata, err := g.resolveMetadata(state.rnd)
+	if err != nil {
+		return err
+	}
+
+	plan.entries[entryIndex].metadata = metadata
 
 	nDirs := g.nDirsInDirGen(state.rnd)
 	for i := 0; i < nDirs; i++ {
@@ -307,12 +315,17 @@ func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error 
 		return fmt.Errorf("failed to generate file data for `%s`: %w", filePath, err)
 	}
 
+	metadata, err := g.resolveMetadata(state.rnd)
+	if err != nil {
+		return err
+	}
+
 	plan.entries = append(plan.entries, plannedEntry{
 		typeID:   plannedEntryTypeFile,
 		path:     filePath,
 		mode:     g.fileModeGen(state.rnd),
 		data:     data,
-		metadata: g.resolveMetadata(state.rnd),
+		metadata: metadata,
 	})
 	state.registerFilePath(filePath)
 	state.lastPath = filePath

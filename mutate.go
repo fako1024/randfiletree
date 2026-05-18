@@ -176,6 +176,7 @@ const (
 type mutationNode struct {
 	typeID mutationNodeType
 	size   int64
+	xattrs map[string]struct{}
 }
 
 type mutationState struct {
@@ -227,6 +228,12 @@ func scanMutationState(basePath string) (*mutationState, error) {
 		default:
 			return nil
 		}
+
+		xattrs, err := scanPathXAttrSet(path)
+		if err != nil {
+			return err
+		}
+		node.xattrs = xattrs
 
 		state.nodes[nodePath] = node
 
@@ -492,23 +499,45 @@ func (state *mutationState) planOperation(kind OperationKind, r *rand.Rand, maxD
 			return Operation{}, errOperationPreconditions
 		}
 
+		target := paths[r.Intn(len(paths))]
+		node := state.nodes[target]
+
+		name := fmt.Sprintf("user.mut_%03d", r.Intn(1000))
+		if node.xattrs != nil {
+			for attempt := 0; attempt < maxMutationPathCollisionRetries; attempt++ {
+				candidate := fmt.Sprintf("user.mut_%03d", r.Intn(1000))
+				if _, exists := node.xattrs[candidate]; exists {
+					continue
+				}
+
+				name = candidate
+				break
+			}
+		}
+
 		return Operation{
 			Kind:       kind,
-			Path:       paths[r.Intn(len(paths))],
-			XAttrName:  fmt.Sprintf("user.mut_%03d", r.Intn(1000)),
+			Path:       target,
+			XAttrName:  name,
 			XAttrValue: randomBytes(r, randomDataLength(r, maxDataSize)),
 		}, nil
 
 	case OperationKindRemoveXAttr:
-		paths := state.sortedPaths(true)
-		if len(paths) == 0 {
+		targets := state.sortedPathsWithXAttrs(true)
+		if len(targets) == 0 {
+			return Operation{}, errOperationPreconditions
+		}
+
+		target := targets[r.Intn(len(targets))]
+		names := state.sortedNodeXAttrs(target)
+		if len(names) == 0 {
 			return Operation{}, errOperationPreconditions
 		}
 
 		return Operation{
 			Kind:      kind,
-			Path:      paths[r.Intn(len(paths))],
-			XAttrName: fmt.Sprintf("user.mut_%03d", r.Intn(1000)),
+			Path:      target,
+			XAttrName: names[r.Intn(len(names))],
 		}, nil
 
 	default:
@@ -561,6 +590,41 @@ func (state *mutationState) sortedFilePaths() []string {
 	return paths
 }
 
+func (state *mutationState) sortedPathsWithXAttrs(includeRoot bool) []string {
+	paths := make([]string, 0, len(state.nodes))
+	for path, node := range state.nodes {
+		if path == "/" && !includeRoot {
+			continue
+		}
+
+		if len(node.xattrs) == 0 {
+			continue
+		}
+
+		paths = append(paths, path)
+	}
+
+	sort.Strings(paths)
+
+	return paths
+}
+
+func (state *mutationState) sortedNodeXAttrs(path string) []string {
+	node, ok := state.nodes[path]
+	if !ok || len(node.xattrs) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(node.xattrs))
+	for name := range node.xattrs {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return names
+}
+
 func (state *mutationState) planUniquePath(r *rand.Rand) (string, error) {
 	dirs := state.sortedDirPaths()
 	if len(dirs) == 0 {
@@ -600,7 +664,7 @@ func (state *mutationState) applyVirtualOperation(op Operation) error {
 		if !state.hasParentDirectory(op.Path) {
 			return fmt.Errorf("create-file parent directory missing for `%s`", op.Path)
 		}
-		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeFile, size: int64(len(op.Data))}
+		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeFile, size: int64(len(op.Data)), xattrs: make(map[string]struct{})}
 
 	case OperationKindCreateDir:
 		if _, exists := state.nodes[op.Path]; exists {
@@ -609,7 +673,7 @@ func (state *mutationState) applyVirtualOperation(op Operation) error {
 		if !state.hasParentDirectory(op.Path) {
 			return fmt.Errorf("create-dir parent directory missing for `%s`", op.Path)
 		}
-		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeDir}
+		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeDir, xattrs: make(map[string]struct{})}
 
 	case OperationKindCreateSymlink:
 		if _, exists := state.nodes[op.Path]; exists {
@@ -618,7 +682,7 @@ func (state *mutationState) applyVirtualOperation(op Operation) error {
 		if !state.hasParentDirectory(op.Path) {
 			return fmt.Errorf("create-symlink parent directory missing for `%s`", op.Path)
 		}
-		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeSymlink}
+		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeSymlink, xattrs: make(map[string]struct{})}
 
 	case OperationKindCreateHardlink:
 		source, exists := state.nodes[op.SourcePath]
@@ -634,7 +698,11 @@ func (state *mutationState) applyVirtualOperation(op Operation) error {
 		if !state.hasParentDirectory(op.Path) {
 			return fmt.Errorf("create-hardlink parent directory missing for `%s`", op.Path)
 		}
-		state.nodes[op.Path] = mutationNode{typeID: mutationNodeTypeFile, size: source.size}
+		nextNode := mutationNode{typeID: mutationNodeTypeFile, size: source.size, xattrs: make(map[string]struct{}, len(source.xattrs))}
+		for name := range source.xattrs {
+			nextNode.xattrs[name] = struct{}{}
+		}
+		state.nodes[op.Path] = nextNode
 
 	case OperationKindDelete:
 		node, exists := state.nodes[op.Path]
@@ -739,9 +807,31 @@ func (state *mutationState) applyVirtualOperation(op Operation) error {
 		}
 
 	case OperationKindSetXAttr, OperationKindRemoveXAttr:
-		if _, exists := state.nodes[op.Path]; !exists {
+		node, exists := state.nodes[op.Path]
+		if !exists {
 			return fmt.Errorf("%s path `%s` does not exist", op.Kind, op.Path)
 		}
+
+		if _, err := validateXAttrName(op.XAttrName); err != nil {
+			return fmt.Errorf("%s xattr name `%s`: %w", op.Kind, op.XAttrName, err)
+		}
+
+		if node.xattrs == nil {
+			node.xattrs = make(map[string]struct{})
+		}
+
+		if op.Kind == OperationKindSetXAttr {
+			node.xattrs[op.XAttrName] = struct{}{}
+			state.nodes[op.Path] = node
+			return nil
+		}
+
+		if _, has := node.xattrs[op.XAttrName]; !has {
+			return fmt.Errorf("remove-xattr name `%s` does not exist on `%s`", op.XAttrName, op.Path)
+		}
+
+		delete(node.xattrs, op.XAttrName)
+		state.nodes[op.Path] = node
 
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedOperation, op.Kind)
@@ -1001,8 +1091,23 @@ func applyOperation(basePath string, op Operation) error {
 			return fmt.Errorf("overwrite-range on `%s` wrote %d bytes, expected %d", op.Path, nWritten, len(op.Data))
 		}
 
-	case OperationKindSetXAttr, OperationKindRemoveXAttr:
-		return fmt.Errorf("%w: %s on `%s`", ErrXAttrPlaceholderUnsupported, op.Kind, op.Path)
+	case OperationKindSetXAttr:
+		if _, err := os.Lstat(path); err != nil {
+			return fmt.Errorf("failed to inspect set-xattr path `%s`: %w", op.Path, err)
+		}
+
+		if err := setPathXAttr(path, op.XAttrName, op.XAttrValue); err != nil {
+			return fmt.Errorf("set-xattr `%s` on `%s`: %w", op.XAttrName, op.Path, err)
+		}
+
+	case OperationKindRemoveXAttr:
+		if _, err := os.Lstat(path); err != nil {
+			return fmt.Errorf("failed to inspect remove-xattr path `%s`: %w", op.Path, err)
+		}
+
+		if err := removePathXAttr(path, op.XAttrName); err != nil {
+			return fmt.Errorf("remove-xattr `%s` on `%s`: %w", op.XAttrName, op.Path, err)
+		}
 
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedOperation, op.Kind)

@@ -358,30 +358,40 @@ func TestApplyOperationsTableDriven(t *testing.T) {
 			},
 		},
 		{
-			name: "SetXAttrUnsupported",
+			name: "SetXAttr",
 			setup: func(t *testing.T, base string) {
+				requireMutationXAttrSupport(t)
 				require.NoError(t, os.WriteFile(filepath.Join(base, "xattr.txt"), []byte("x"), 0o600))
 			},
 			op: Operation{
-				Kind:      OperationKindSetXAttr,
-				Path:      "/xattr.txt",
-				XAttrName: "user.test",
+				Kind:       OperationKindSetXAttr,
+				Path:       "/xattr.txt",
+				XAttrName:  "user.test",
+				XAttrValue: []byte("value"),
 			},
-			errContains: "set-xattr",
-			errIs:       ErrXAttrPlaceholderUnsupported,
+			verify: func(t *testing.T, base string) {
+				value, err := getPathXAttr(filepath.Join(base, "xattr.txt"), "user.test")
+				require.NoError(t, err)
+				require.Equal(t, []byte("value"), value)
+			},
 		},
 		{
-			name: "RemoveXAttrUnsupported",
+			name: "RemoveXAttr",
 			setup: func(t *testing.T, base string) {
+				requireMutationXAttrSupport(t)
 				require.NoError(t, os.WriteFile(filepath.Join(base, "xattr.txt"), []byte("x"), 0o600))
+				require.NoError(t, setPathXAttr(filepath.Join(base, "xattr.txt"), "user.test", []byte("value")))
 			},
 			op: Operation{
 				Kind:      OperationKindRemoveXAttr,
 				Path:      "/xattr.txt",
 				XAttrName: "user.test",
 			},
-			errContains: "remove-xattr",
-			errIs:       ErrXAttrPlaceholderUnsupported,
+			verify: func(t *testing.T, base string) {
+				names, err := listPathXAttrNames(filepath.Join(base, "xattr.txt"))
+				require.NoError(t, err)
+				require.NotContains(t, names, "user.test")
+			},
 		},
 	}
 
@@ -690,5 +700,31 @@ func requireMutationChownSupport(t *testing.T) {
 
 	if err := os.Lchown(target, os.Getuid(), os.Getgid()); err != nil {
 		t.Skipf("chown not supported in this test environment: %s", err)
+	}
+}
+
+func requireMutationXAttrSupport(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("xattr operations are not supported on windows")
+	}
+
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "target.txt")
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
+
+	if err := setPathXAttr(target, "user.probe", []byte("v")); err != nil {
+		if errors.Is(err, ErrXAttrMetadataUnsupported) || errors.Is(err, ErrXAttrUnsupported) {
+			t.Skipf("xattr not supported in this test environment: %s", err)
+		}
+		t.Skipf("xattr probe failed in this test environment: %s", err)
+	}
+
+	if err := removePathXAttr(target, "user.probe"); err != nil {
+		if errors.Is(err, ErrXAttrMetadataUnsupported) || errors.Is(err, ErrXAttrUnsupported) {
+			t.Skipf("xattr remove not supported in this test environment: %s", err)
+		}
+		t.Skipf("xattr remove probe failed in this test environment: %s", err)
 	}
 }

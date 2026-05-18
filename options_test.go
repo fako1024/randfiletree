@@ -149,6 +149,59 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithXAttr",
+			option: WithXAttr("user.test", []byte("value")),
+			assert: func(t *testing.T, g *Generator) {
+				metadata, err := g.resolveMetadata(g.rndSrc)
+				require.NoError(t, err)
+				require.True(t, metadata.hasXAttrs)
+				require.Equal(t, []byte("value"), metadata.xattrs["user.test"])
+			},
+		},
+		{
+			name: "WithXAttrsFixed",
+			option: WithXAttrsFixed(map[string][]byte{
+				"user.b": []byte("B"),
+				"user.a": []byte("A"),
+			}),
+			assert: func(t *testing.T, g *Generator) {
+				names := make([]string, 0, len(g.xattrValueGens))
+				for _, cfg := range g.xattrValueGens {
+					names = append(names, cfg.name)
+				}
+				require.Equal(t, []string{"user.a", "user.b"}, names)
+
+				metadata, err := g.resolveMetadata(g.rndSrc)
+				require.NoError(t, err)
+				require.Equal(t, []byte("A"), metadata.xattrs["user.a"])
+				require.Equal(t, []byte("B"), metadata.xattrs["user.b"])
+			},
+		},
+		{
+			name:   "WithTrustedXAttrNamespace",
+			option: WithTrustedXAttrNamespace(true),
+			assert: func(t *testing.T, g *Generator) {
+				require.True(t, g.xattrAllowTrustedNamespace)
+			},
+		},
+		{
+			name:   "WithSecurityXAttrNamespace",
+			option: WithSecurityXAttrNamespace(true),
+			assert: func(t *testing.T, g *Generator) {
+				require.True(t, g.xattrAllowSecurityNamespace)
+			},
+		},
+		{
+			name:   "WithACL",
+			option: WithACL("g::r--", "u::rw-", "u::rw-"),
+			assert: func(t *testing.T, g *Generator) {
+				metadata, err := g.resolveMetadata(g.rndSrc)
+				require.NoError(t, err)
+				require.True(t, metadata.hasACL)
+				require.Equal(t, []string{"g::r--", "u::rw-"}, metadata.aclEntries)
+			},
+		},
+		{
 			name: "WithSymlinkGenerator",
 			option: WithSymlinkGenerator(func(r *rand.Rand) bool {
 				return true
@@ -372,6 +425,21 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			errContains: "mtime generator must not be nil",
 		},
 		{
+			name:        "InvalidXAttrName",
+			option:      WithXAttrValueGenerator("invalid", DataGeneratorFixedString("x")),
+			errContains: "xattr name must include namespace prefix",
+		},
+		{
+			name:        "NilXAttrValueGenerator",
+			option:      WithXAttrValueGenerator("user.test", nil),
+			errContains: "xattr value generator must not be nil",
+		},
+		{
+			name:        "NilACLGenerator",
+			option:      WithACLGenerator(nil),
+			errContains: "ACL generator must not be nil",
+		},
+		{
 			name:        "NilSymlinkGenerator",
 			option:      WithSymlinkGenerator(nil),
 			errContains: "symlink generator must not be nil",
@@ -531,6 +599,42 @@ func TestValidateSymlinkStrategyProbabilitiesSentinelErrors(t *testing.T) {
 		SymlinkStrategyRelative: 0,
 	})
 	require.ErrorIs(t, err, ErrSymlinkStrategyProbabilitiesNonPositive)
+}
+
+func TestValidateXAttrNameAndACLEntries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("XAttrNameValid", func(t *testing.T) {
+		t.Parallel()
+
+		name, err := validateXAttrName("user.test")
+		require.NoError(t, err)
+		require.Equal(t, "user.test", name)
+	})
+
+	t.Run("XAttrNameInvalid", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := validateXAttrName("invalid")
+		require.ErrorIs(t, err, ErrXAttrNameMissingNamespace)
+
+		_, err = validateXAttrName("user.\x00name")
+		require.ErrorIs(t, err, ErrXAttrNameContainsNUL)
+	})
+
+	t.Run("NormalizeACLEntries", func(t *testing.T) {
+		t.Parallel()
+
+		normalized, err := normalizeACLEntries([]string{"u::rw-", "g::r--", "u::rw-"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"g::r--", "u::rw-"}, normalized)
+
+		_, err = normalizeACLEntries([]string{""})
+		require.ErrorIs(t, err, ErrACLEntryEmpty)
+
+		_, err = normalizeACLEntries([]string{"u::rw-,g::r--"})
+		require.ErrorIs(t, err, ErrACLEntryContainsComma)
+	})
 }
 
 func TestNewWithOptions(t *testing.T) {
