@@ -2,6 +2,20 @@ package diff
 
 import "io/fs"
 
+// InodeType denotes the inode type observed for a node.
+type InodeType uint8
+
+const (
+	InodeTypeRegular InodeType = iota + 1
+	InodeTypeDirectory
+	InodeTypeSymlink
+	InodeTypeFIFO
+	InodeTypeSocket
+	InodeTypeCharDevice
+	InodeTypeBlockDevice
+	InodeTypeOther
+)
+
 // Node denotes an element / node in a file tree.
 type Node struct {
 	Path       string
@@ -21,6 +35,12 @@ type Node struct {
 	GID           uint32
 	HasOwnership  bool
 	HasAccessTime bool
+
+	InodeType InodeType
+
+	DeviceMajor      uint32
+	DeviceMinor      uint32
+	HasDeviceNumbers bool
 
 	XAttrs    []XAttr
 	HasXAttrs bool

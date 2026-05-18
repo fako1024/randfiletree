@@ -708,3 +708,40 @@ func TestRunRejectsXAttrNamespaceWithoutOptIn(t *testing.T) {
 	_, statErr := os.Stat(base)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
+
+func TestRunRejectsIncompleteSpecialDeviceConfiguration(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(1),
+		WithDirNameGenerator(func(r *rand.Rand, length int) string { return "dir" }),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(3)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string { return "file" }),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(4)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+		WithSpecialFileProbability(1),
+		WithSpecialFileTypeGenerator(func(r *rand.Rand) SpecialFileType {
+			return SpecialFileTypeCharDevice
+		}),
+		WithSpecialDeviceNumberGenerators(NumberGeneratorConstant(1), NumberGeneratorConstant(2)),
+		func(next *Generator) error {
+			next.specialDeviceMinorGen = nil
+			return nil
+		},
+	))
+
+	err := g.Run()
+	require.Error(t, err)
+	require.ErrorContains(t, err, ErrSpecialDeviceConfigurationIncomplete.Error())
+}

@@ -380,6 +380,84 @@ func WithHardlinkGenerator(gen BooleanGenerator) Option {
 	}
 }
 
+// WithSpecialFileGenerator sets the generator used to decide whether to create special files.
+func WithSpecialFileGenerator(gen BooleanGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateBooleanGenerator("special file generator", gen); err != nil {
+			return err
+		}
+
+		g.specialFileProbGen = gen
+
+		return nil
+	}
+}
+
+// WithSpecialFileTypeGenerator sets the generator used to choose special file types.
+func WithSpecialFileTypeGenerator(gen SpecialFileTypeGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateSpecialFileTypeGenerator("special file type generator", gen); err != nil {
+			return err
+		}
+
+		g.specialFileTypeGen = gen
+
+		return nil
+	}
+}
+
+// WithSpecialFileTypeProbabilities sets weighted special file type probabilities.
+func WithSpecialFileTypeProbabilities(probabilities map[SpecialFileType]float64) Option {
+	return func(g *Generator) error {
+		if err := validateSpecialFileTypeProbabilities(probabilities); err != nil {
+			return err
+		}
+
+		copyProbabilities := make(map[SpecialFileType]float64, len(probabilities))
+		for fileType, probability := range probabilities {
+			copyProbabilities[fileType] = probability
+		}
+
+		g.specialFileTypeGen = SpecialFileTypeGeneratorProbabilityWeighted(copyProbabilities)
+
+		return nil
+	}
+}
+
+// WithSpecialDeviceNumberGenerators sets generators for special device major/minor numbers.
+func WithSpecialDeviceNumberGenerators(majorGen, minorGen NumberGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateNumberGenerator("special device major generator", majorGen); err != nil {
+			return err
+		}
+		if err := validateNumberGenerator("special device minor generator", minorGen); err != nil {
+			return err
+		}
+
+		g.specialDeviceMajorGen = majorGen
+		g.specialDeviceMinorGen = minorGen
+
+		return nil
+	}
+}
+
+// WithSpecialDeviceNumbers sets fixed special device major/minor numbers.
+func WithSpecialDeviceNumbers(major, minor int) Option {
+	return func(g *Generator) error {
+		if major < 0 {
+			return fmt.Errorf("special device major must be >= 0, got %d", major)
+		}
+		if minor < 0 {
+			return fmt.Errorf("special device minor must be >= 0, got %d", minor)
+		}
+
+		g.specialDeviceMajorGen = NumberGeneratorConstant(major)
+		g.specialDeviceMinorGen = NumberGeneratorConstant(minor)
+
+		return nil
+	}
+}
+
 // WithSymlinkStrategyGenerator sets the generator used to choose symlink target strategies.
 func WithSymlinkStrategyGenerator(gen SymlinkStrategyGenerator) Option {
 	return func(g *Generator) error {
@@ -443,6 +521,19 @@ func WithHardlinkProbability(probability float64) Option {
 		}
 
 		g.hardlinkProbGen = BooleanGeneratorProbabilityFlat(probability)
+
+		return nil
+	}
+}
+
+// WithSpecialFileProbability sets a flat probability for special file creation in the range [0, 1].
+func WithSpecialFileProbability(probability float64) Option {
+	return func(g *Generator) error {
+		if err := validateProbability("special file probability", probability); err != nil {
+			return err
+		}
+
+		g.specialFileProbGen = BooleanGeneratorProbabilityFlat(probability)
 
 		return nil
 	}
@@ -596,6 +687,14 @@ func validateTimestampGenerator(name string, gen TimestampGenerator) error {
 	return nil
 }
 
+func validateSpecialFileTypeGenerator(name string, gen SpecialFileTypeGenerator) error {
+	if gen == nil {
+		return fmt.Errorf("%s must not be nil", name)
+	}
+
+	return nil
+}
+
 func validateSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]float64) error {
 	if len(probabilities) == 0 {
 		return ErrSymlinkStrategyProbabilitiesEmpty
@@ -622,6 +721,37 @@ func validateSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]floa
 
 	if total <= 0 {
 		return ErrSymlinkStrategyProbabilitiesNonPositive
+	}
+
+	return nil
+}
+
+func validateSpecialFileTypeProbabilities(probabilities map[SpecialFileType]float64) error {
+	if len(probabilities) == 0 {
+		return ErrSpecialFileTypeProbabilitiesEmpty
+	}
+
+	total := 0.0
+	for fileType, probability := range probabilities {
+		if err := validateSpecialFileType(fileType); err != nil {
+			return err
+		}
+
+		if math.IsNaN(probability) {
+			return fmt.Errorf("special file type probability for %s must not be NaN", fileType)
+		}
+		if math.IsInf(probability, 0) {
+			return fmt.Errorf("special file type probability for %s must be finite", fileType)
+		}
+		if probability < 0 {
+			return fmt.Errorf("special file type probability for %s must be >= 0, got %v", fileType, probability)
+		}
+
+		total += probability
+	}
+
+	if total <= 0 {
+		return ErrSpecialFileTypeProbabilitiesNonPositive
 	}
 
 	return nil
