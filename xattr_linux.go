@@ -21,7 +21,7 @@ func setPathXAttr(path, name string, value []byte) error {
 		switch {
 		case errors.Is(err, unix.EPERM), errors.Is(err, unix.EACCES):
 			return fmt.Errorf("%w for `%s` name `%s`: %v", ErrXAttrPermissionDenied, path, normalizedName, err)
-		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP):
+		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EINVAL):
 			return fmt.Errorf("%w for `%s` name `%s`: %v", ErrXAttrUnsupported, path, normalizedName, err)
 		default:
 			return fmt.Errorf("failed to set xattr `%s` on `%s`: %w", normalizedName, path, err)
@@ -41,7 +41,7 @@ func removePathXAttr(path, name string) error {
 		switch {
 		case errors.Is(err, unix.EPERM), errors.Is(err, unix.EACCES):
 			return fmt.Errorf("%w for `%s` name `%s`: %v", ErrXAttrPermissionDenied, path, normalizedName, err)
-		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP):
+		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EINVAL):
 			return fmt.Errorf("%w for `%s` name `%s`: %v", ErrXAttrUnsupported, path, normalizedName, err)
 		default:
 			return fmt.Errorf("failed to remove xattr `%s` on `%s`: %w", normalizedName, path, err)

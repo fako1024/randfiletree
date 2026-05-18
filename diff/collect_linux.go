@@ -76,7 +76,7 @@ func listXAttrNames(path string) ([]string, error) {
 	size, err := unix.Llistxattr(path, nil)
 	if err != nil {
 		switch {
-		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP):
+		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EINVAL):
 			return nil, fmt.Errorf("%w for `%s`: %w", ErrXAttrCollectionUnsupported, path, err)
 		default:
 			return nil, fmt.Errorf("failed to list xattrs for `%s`: %w", path, err)

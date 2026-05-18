@@ -706,15 +706,25 @@ func requireMutationChownSupport(t *testing.T) {
 func requireMutationXAttrSupport(t *testing.T) {
 	t.Helper()
 
+	if runtime.GOOS == "windows" {
+		t.Skip("xattr operations are not supported on windows")
+	}
+
 	targetDir := t.TempDir()
 	target := filepath.Join(targetDir, "target.txt")
 	require.NoError(t, os.WriteFile(target, []byte("data"), 0o600))
 
 	if err := setPathXAttr(target, "user.probe", []byte("v")); err != nil {
-		t.Skipf("xattr not supported in this test environment: %s", err)
+		if errors.Is(err, ErrXAttrMetadataUnsupported) || errors.Is(err, ErrXAttrUnsupported) {
+			t.Skipf("xattr not supported in this test environment: %s", err)
+		}
+		t.Skipf("xattr probe failed in this test environment: %s", err)
 	}
 
 	if err := removePathXAttr(target, "user.probe"); err != nil {
-		t.Skipf("xattr remove not supported in this test environment: %s", err)
+		if errors.Is(err, ErrXAttrMetadataUnsupported) || errors.Is(err, ErrXAttrUnsupported) {
+			t.Skipf("xattr remove not supported in this test environment: %s", err)
+		}
+		t.Skipf("xattr remove probe failed in this test environment: %s", err)
 	}
 }
