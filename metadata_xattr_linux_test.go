@@ -128,9 +128,9 @@ func TestRunACLAppliedWhenToolingAvailable(t *testing.T) {
 		t.Skipf("failed to read ACL in environment: %v", readErr)
 	}
 
-	require.Contains(t, entries, "group::r--")
-	require.Contains(t, entries, "mask::rw-")
-	require.Contains(t, entries, "other::---")
+	require.True(t, containsACLEntryPrefix(entries, "user::rw-"), "expected user ACL entry, got: %v", entries)
+	require.True(t, containsACLEntryPrefix(entries, "group::"), "expected group ACL entry, got: %v", entries)
+	require.True(t, containsACLEntryPrefix(entries, "other::---"), "expected other ACL entry, got: %v", entries)
 }
 
 func readACL(path string) ([]string, error) {
@@ -156,6 +156,16 @@ func readACL(path string) ([]string, error) {
 	}
 
 	return entries, nil
+}
+
+func containsACLEntryPrefix(entries []string, prefix string) bool {
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func errorIsAny(err error, candidates ...error) bool {

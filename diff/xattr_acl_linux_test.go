@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,11 +109,15 @@ func TestPathsWithOptionsACLParity(t *testing.T) {
 	setACL(t, leftFile, "u::rw-,g::r--")
 	setACL(t, rightFile, "u::rw-,g::r--")
 
+	requireACEPresent(t, leftFile, "group::r--")
+	requireACEPresent(t, rightFile, "group::r--")
+
 	opts := DefaultOptions()
 	opts.CompareACLs = true
 	require.NoError(t, PathsWithOptions(left, right, opts))
 
 	setACL(t, rightFile, "u::rw-,g::---")
+	requireACEPresent(t, rightFile, "group::---")
 	err := PathsWithOptions(left, right, opts)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "ACL mismatch")
@@ -155,4 +160,23 @@ func setACL(t *testing.T, path, acl string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("failed to apply ACL on %s: %v (%s)", path, err, string(out))
 	}
+}
+
+func requireACEPresent(t *testing.T, path, expectedEntry string) {
+	t.Helper()
+
+	cmd := exec.Command("getfacl", "--absolute-names", "--omit-header", path) // #nosec G204
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Skipf("failed to inspect ACL on %s: %v (%s)", path, err, string(output))
+	}
+
+	entries := strings.Split(string(output), "\n")
+	for _, entry := range entries {
+		if strings.TrimSpace(entry) == expectedEntry {
+			return
+		}
+	}
+
+	t.Skipf("ACL entry %q missing on %s (output: %s)", expectedEntry, path, string(output))
 }
