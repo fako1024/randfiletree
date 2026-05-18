@@ -111,7 +111,7 @@ func (g *Generator) planDir(path string, depth int, state *planState, plan *runP
 
 	nDirs := g.nDirsInDirGen(state.rnd)
 	for i := 0; i < nDirs; i++ {
-		dirPath, err := g.planUniquePath(path, state, g.dirNameGen, g.dirNameLenGen, "directory")
+		dirPath, err := g.planUniquePathWithByte(path, state, g.dirNameGen, g.dirNameLenGen, g.byteDirNameGen, "directory")
 		if err != nil {
 			return err
 		}
@@ -217,7 +217,7 @@ func (g *Generator) planSymlinkStrategy(
 		return true, nil
 
 	case SymlinkStrategyDangling:
-		danglingTarget, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "dangling symlink target")
+		danglingTarget, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "dangling symlink target")
 		if err != nil {
 			return false, err
 		}
@@ -229,7 +229,7 @@ func (g *Generator) planSymlinkStrategy(
 		return true, nil
 
 	case SymlinkStrategySelfReferential:
-		symlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "self-referential symlink")
+		symlinkPath, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "self-referential symlink")
 		if err != nil {
 			return false, err
 		}
@@ -269,7 +269,7 @@ func (g *Generator) planSymlinkCycle(dir string, length int, state *planState, p
 
 	cyclePaths := make([]string, 0, length)
 	for i := 0; i < length; i++ {
-		symlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "symlink cycle")
+		symlinkPath, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "symlink cycle")
 		if err != nil {
 			return err
 		}
@@ -302,7 +302,7 @@ func (g *Generator) tryPlanHardlink(dir string, state *planState, plan *runPlan)
 		return false, nil
 	}
 
-	hardlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "hardlink")
+	hardlinkPath, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "hardlink")
 	if err != nil {
 		return false, err
 	}
@@ -330,7 +330,7 @@ func (g *Generator) tryPlanSpecialFile(dir string, state *planState, plan *runPl
 		return false, fmt.Errorf("invalid configured special file type: %w", err)
 	}
 
-	path, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "special file")
+	path, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "special file")
 	if err != nil {
 		return false, err
 	}
@@ -365,7 +365,7 @@ func (g *Generator) tryPlanSpecialFile(dir string, state *planState, plan *runPl
 }
 
 func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error {
-	filePath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "file")
+	filePath, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "file")
 	if err != nil {
 		return err
 	}
@@ -422,7 +422,7 @@ func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error 
 }
 
 func (g *Generator) planSymlink(dir, target string, state *planState, plan *runPlan) error {
-	symlinkPath, err := g.planUniquePath(dir, state, g.fileNameGen, g.fileNameLenGen, "symlink")
+	symlinkPath, err := g.planUniquePathWithByte(dir, state, g.fileNameGen, g.fileNameLenGen, g.byteFileNameGen, "symlink")
 	if err != nil {
 		return err
 	}
@@ -441,15 +441,22 @@ func (g *Generator) appendSymlink(plan *runPlan, state *planState, path, target 
 	state.registerSymlinkPath(path)
 }
 
-func (g *Generator) planUniquePath(
+func (g *Generator) planUniquePathWithByte(
 	dir string,
 	state *planState,
 	nameGen FileNameGenerator,
 	lenGen NumberGenerator,
+	byteGen ByteNameGenerator,
 	entryKind string,
 ) (string, error) {
 	for attempt := 1; attempt <= maxPlanPathCollisionRetries; attempt++ {
-		path := filepath.Join(dir, nameGen(state.rnd, lenGen(state.rnd)))
+		var name string
+		if byteGen != nil {
+			name = byteGen(state.rnd, lenGen(state.rnd))
+		} else {
+			name = nameGen(state.rnd, lenGen(state.rnd))
+		}
+		path := filepath.Join(dir, name)
 		if _, exists := state.used[path]; exists {
 			continue
 		}
