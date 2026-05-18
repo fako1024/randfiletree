@@ -3,12 +3,17 @@
 package diff
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"os/exec"
+	"sort"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-func collectPlatformMetadata(path string, node *Node) error {
+func collectPlatformMetadata(path string, node *Node, opts Options) error {
 	var stat unix.Stat_t
 	if err := unix.Lstat(path, &stat); err != nil {
 		return fmt.Errorf("failed to stat path `%s`: %w", path, err)
@@ -22,5 +27,152 @@ func collectPlatformMetadata(path string, node *Node) error {
 	node.HasAccessTime = true
 	node.ModTimeNsec = unix.TimespecToNsec(stat.Mtim)
 
+	if opts.CompareXAttrs {
+		xattrs, err := collectXAttrs(path)
+		if err != nil {
+			return err
+		}
+
+		node.XAttrs = xattrs
+		node.HasXAttrs = true
+	}
+
+	if opts.CompareACLs {
+		entries, err := collectACLEntries(path)
+		if err != nil {
+			return err
+		}
+
+		node.ACLEntries = entries
+		node.HasACL = true
+	}
+
 	return nil
+}
+
+func collectXAttrs(path string) ([]XAttr, error) {
+	names, err := listXAttrNames(path)
+	if err != nil {
+		return nil, err
+	}
+
+	xattrs := make([]XAttr, 0, len(names))
+	for _, name := range names {
+		value, err := getXAttr(path, name)
+		if err != nil {
+			return nil, err
+		}
+
+		xattrs = append(xattrs, XAttr{
+			Name:  name,
+			Value: value,
+		})
+	}
+
+	return xattrs, nil
+}
+
+func listXAttrNames(path string) ([]string, error) {
+	size, err := unix.Llistxattr(path, nil)
+	if err != nil {
+		switch {
+		case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP):
+			return nil, fmt.Errorf("%w for `%s`: %w", ErrXAttrCollectionUnsupported, path, err)
+		default:
+			return nil, fmt.Errorf("failed to list xattrs for `%s`: %w", path, err)
+		}
+	}
+
+	if size == 0 {
+		return nil, nil
+	}
+
+	buf := make([]byte, size)
+	readSize, err := unix.Llistxattr(path, buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list xattrs for `%s`: %w", path, err)
+	}
+
+	if readSize <= 0 {
+		return nil, nil
+	}
+
+	buf = buf[:readSize]
+	parts := strings.Split(string(buf), "\x00")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		names = append(names, part)
+	}
+
+	sort.Strings(names)
+
+	return names, nil
+}
+
+func getXAttr(path, name string) ([]byte, error) {
+	size, err := unix.Lgetxattr(path, name, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read xattr `%s` for `%s`: %w", name, path, err)
+	}
+
+	if size == 0 {
+		return nil, nil
+	}
+
+	buf := make([]byte, size)
+	readSize, err := unix.Lgetxattr(path, name, buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read xattr `%s` for `%s`: %w", name, path, err)
+	}
+
+	if readSize < 0 {
+		return nil, nil
+	}
+
+	return append([]byte(nil), buf[:readSize]...), nil
+}
+
+func collectACLEntries(path string) ([]string, error) {
+	if _, err := exec.LookPath("getfacl"); err != nil {
+		return nil, fmt.Errorf("%w: getfacl not found", ErrACLToolingUnavailable)
+	}
+
+	cmd := exec.Command("getfacl", "--absolute-names", "--omit-header", path) // #nosec G204
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			msg = err.Error()
+		}
+
+		switch {
+		case strings.Contains(msg, "Operation not supported"):
+			return nil, fmt.Errorf("%w for `%s`: %s", ErrACLCollectionUnsupported, path, msg)
+		default:
+			return nil, fmt.Errorf("failed to collect ACL for `%s`: %s", path, msg)
+		}
+	}
+
+	lines := bytes.Split(output, []byte{'\n'})
+	entries := make([]string, 0, len(lines))
+	for _, line := range lines {
+		entry := strings.TrimSpace(string(line))
+		if entry == "" {
+			continue
+		}
+
+		if strings.HasPrefix(entry, "#") {
+			continue
+		}
+
+		entries = append(entries, entry)
+	}
+
+	sort.Strings(entries)
+
+	return entries, nil
 }

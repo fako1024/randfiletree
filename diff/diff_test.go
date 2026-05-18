@@ -346,45 +346,42 @@ func TestPathsWithOptionsHardlinkTopologyToggle(t *testing.T) {
 	require.ErrorContains(t, err, "hardlink topology mismatch")
 }
 
-func TestPathsWithOptionsMetadataHookValidation(t *testing.T) {
+func TestRunMetadataHooksComparatorOptional(t *testing.T) {
 	t.Parallel()
 
-	t.Run("XAttrComparatorRequired", func(t *testing.T) {
-		t.Parallel()
+	nodesA := []Node{{Path: "/file.txt", HasXAttrs: true, HasACL: true}}
+	nodesB := []Node{{Path: "/file.txt", HasXAttrs: true, HasACL: true}}
 
-		opts := DefaultOptions()
-		opts.CompareXAttrs = true
+	opts := DefaultOptions()
+	opts.CompareXAttrs = true
+	opts.CompareACLs = true
 
-		err := PathsWithOptions(t.TempDir(), t.TempDir(), opts)
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrXAttrComparatorNil)
-	})
-
-	t.Run("ACLComparatorRequired", func(t *testing.T) {
-		t.Parallel()
-
-		opts := DefaultOptions()
-		opts.CompareACLs = true
-
-		err := PathsWithOptions(t.TempDir(), t.TempDir(), opts)
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrACLComparatorNil)
-	})
+	require.NoError(t, runMetadataHooks(nodesA, nodesB, opts))
 }
 
-func TestPathsWithOptionsXAttrHookDeterministicOrder(t *testing.T) {
+func TestEnsureMetadataAvailabilityErrors(t *testing.T) {
 	t.Parallel()
 
-	base := t.TempDir()
-	pathA := filepath.Join(base, "a")
-	pathB := filepath.Join(base, "b")
-	require.NoError(t, os.MkdirAll(pathA, 0o750))
-	require.NoError(t, os.MkdirAll(pathB, 0o750))
+	nodes := []Node{{Path: "/file.txt"}}
 
-	require.NoError(t, os.WriteFile(filepath.Join(pathA, "z.txt"), []byte("same"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(pathB, "z.txt"), []byte("same"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(pathA, "a.txt"), []byte("same"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(pathB, "a.txt"), []byte("same"), 0o600))
+	optsXAttr := DefaultOptions()
+	optsXAttr.CompareXAttrs = true
+	err := ensureXAttrMetadata(nodes, nodes, optsXAttr)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrXAttrMetadataUnavailable)
+
+	optsACL := DefaultOptions()
+	optsACL.CompareACLs = true
+	err = ensureACLMetadata(nodes, nodes, optsACL)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrACLMetadataUnavailable)
+}
+
+func TestRunMetadataHooksXAttrDeterministicOrder(t *testing.T) {
+	t.Parallel()
+
+	nodesA := []Node{{Path: "/a.txt", HasXAttrs: true}, {Path: "/z.txt", HasXAttrs: true}}
+	nodesB := []Node{{Path: "/a.txt", HasXAttrs: true}, {Path: "/z.txt", HasXAttrs: true}}
 
 	paths := make([]string, 0, 2)
 	opts := DefaultOptions()
@@ -394,20 +391,15 @@ func TestPathsWithOptionsXAttrHookDeterministicOrder(t *testing.T) {
 		return nil
 	}
 
-	require.NoError(t, PathsWithOptions(pathA, pathB, opts))
+	require.NoError(t, runMetadataHooks(nodesA, nodesB, opts))
 	require.Equal(t, []string{"/a.txt", "/z.txt"}, paths)
 }
 
-func TestPathsWithOptionsACLHookMismatch(t *testing.T) {
+func TestRunMetadataHooksACLHookMismatch(t *testing.T) {
 	t.Parallel()
 
-	base := t.TempDir()
-	pathA := filepath.Join(base, "a")
-	pathB := filepath.Join(base, "b")
-	require.NoError(t, os.MkdirAll(pathA, 0o750))
-	require.NoError(t, os.MkdirAll(pathB, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(pathA, "file.txt"), []byte("same"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(pathB, "file.txt"), []byte("same"), 0o600))
+	nodesA := []Node{{Path: "/file.txt", HasACL: true}}
+	nodesB := []Node{{Path: "/file.txt", HasACL: true}}
 
 	opts := DefaultOptions()
 	opts.CompareACLs = true
@@ -415,7 +407,7 @@ func TestPathsWithOptionsACLHookMismatch(t *testing.T) {
 		return fmt.Errorf("missing ACL parity")
 	}
 
-	err := PathsWithOptions(pathA, pathB, opts)
+	err := runMetadataHooks(nodesA, nodesB, opts)
 	require.Error(t, err)
 	require.EqualError(t, err, "ACL mismatch for path `/file.txt`: missing ACL parity")
 }

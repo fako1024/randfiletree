@@ -6,6 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -54,5 +58,87 @@ func applyMetadata(path string, mode uint32, metadata metadataConfig) error {
 		}
 	}
 
+	if metadata.hasXAttrs {
+		if err := applyXAttrs(path, metadata.xattrs); err != nil {
+			return err
+		}
+	}
+
+	if metadata.hasACL {
+		if err := applyACL(path, metadata.aclEntries, metadata.aclUseTools); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+func applyXAttrs(path string, xattrs map[string][]byte) error {
+	if len(xattrs) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(xattrs))
+	for name := range xattrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if err := setPathXAttr(path, name, xattrs[name]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func applyACL(path string, entries []string, useTools bool) error {
+	if !useTools {
+		return ErrACLCommandBackendDisabled
+	}
+
+	if _, err := exec.LookPath("setfacl"); err != nil {
+		return fmt.Errorf("%w: setfacl not found", ErrACLToolingUnavailable)
+	}
+
+	baseArgs := []string{"-b", path}
+	if err := runACLCommand(baseArgs...); err != nil {
+		return err
+	}
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	args := []string{"-m", strings.Join(entries, ","), path}
+	if err := runACLCommand(args...); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func runACLCommand(args ...string) error {
+	cmd := exec.Command("setfacl", args...) // #nosec G204
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+
+	msg := strings.TrimSpace(string(output))
+	if msg == "" {
+		msg = err.Error()
+	}
+
+	switch {
+	case strings.Contains(msg, "Operation not supported"):
+		return fmt.Errorf("%w: %s", ErrACLUnsupported, msg)
+	case strings.Contains(msg, "Operation not permitted"), strings.Contains(msg, "Permission denied"):
+		return fmt.Errorf("%w: %s", ErrACLPermissionDenied, msg)
+	case strings.Contains(msg, "Invalid argument"), strings.Contains(msg, "Invalid ACL"):
+		return fmt.Errorf("%w: %s", ErrACLInvalidEntry, msg)
+	default:
+		return fmt.Errorf("setfacl %s failed for `%s`: %s", strings.Join(args[:len(args)-1], " "), filepath.Clean(args[len(args)-1]), msg)
+	}
 }

@@ -20,5 +20,13 @@ func applyMetadata(path string, mode uint32, metadata metadataConfig) error {
 		return fmt.Errorf("%w for `%s`", ErrTimestampMetadataUnsupported, path)
 	}
 
+	if metadata.hasXAttrs {
+		return fmt.Errorf("%w for `%s`", ErrXAttrMetadataUnsupported, path)
+	}
+
+	if metadata.hasACL {
+		return fmt.Errorf("%w for `%s`", ErrACLMetadataUnsupported, path)
+	}
+
 	return nil
 }

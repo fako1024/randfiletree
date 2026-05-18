@@ -36,6 +36,13 @@ type Generator struct {
 	atimeGen TimestampGenerator
 	mtimeGen TimestampGenerator
 
+	xattrValueGens              []xattrValueGeneratorConfig
+	xattrAllowTrustedNamespace  bool
+	xattrAllowSecurityNamespace bool
+
+	aclEntriesGen            ACLGenerator
+	aclCommandBackendEnabled bool
+
 	symlinkProbGen    BooleanGenerator
 	symlinkRelProbGen BooleanGenerator
 	hardlinkProbGen   BooleanGenerator
@@ -119,11 +126,13 @@ func (g *Generator) hasNoConfiguration() bool {
 		g.symlinkProbGen == nil &&
 		g.symlinkRelProbGen == nil &&
 		g.hardlinkProbGen == nil &&
-		g.symlinkStrategyGen == nil
+		g.symlinkStrategyGen == nil &&
+		len(g.xattrValueGens) == 0 &&
+		g.aclEntriesGen == nil
 }
 
 func (g *Generator) validateRunConfiguration() error {
-	missing := make([]string, 0, 17)
+	missing := make([]string, 0, 20)
 
 	if g.rndSrc == nil {
 		missing = append(missing, "random source")
@@ -169,6 +178,12 @@ func (g *Generator) validateRunConfiguration() error {
 	}
 	if g.symlinkRelProbGen == nil && g.symlinkStrategyGen == nil {
 		missing = append(missing, "relative symlink generator or symlink strategy generator")
+	}
+	if err := g.validateXAttrConfiguration(); err != nil {
+		missing = append(missing, err.Error())
+	}
+	if g.aclEntriesGen != nil && !g.aclCommandBackendEnabled {
+		missing = append(missing, ErrACLConfigurationIncomplete.Error())
 	}
 	if err := validateRunMode(g.runMode); err != nil {
 		missing = append(missing, err.Error())
