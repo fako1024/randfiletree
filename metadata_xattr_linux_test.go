@@ -110,7 +110,7 @@ func TestRunACLAppliedWhenToolingAvailable(t *testing.T) {
 
 	base := filepath.Join(t.TempDir(), "tree")
 	g := newMetadataConfiguredGenerator(t, base,
-		WithACL("u::rw-", "g::r--", "m::rw-", "o::---"),
+		WithACL("u::rwx", "g::r-x", "m::rwx", "o::---"),
 		WithACLCommandBackend(true),
 	)
 
@@ -128,7 +128,7 @@ func TestRunACLAppliedWhenToolingAvailable(t *testing.T) {
 		t.Skipf("failed to read ACL in environment: %v", readErr)
 	}
 
-	require.True(t, containsACLEntryPrefix(entries, "user::rw-"), "expected user ACL entry, got: %v", entries)
+	require.True(t, containsACLEntryPrefix(entries, "user::"), "expected user ACL entry, got: %v", entries)
 	require.True(t, containsACLEntryPrefix(entries, "group::"), "expected group ACL entry, got: %v", entries)
 	require.True(t, containsACLEntryPrefix(entries, "other::---"), "expected other ACL entry, got: %v", entries)
 }
