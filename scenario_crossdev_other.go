@@ -19,7 +19,7 @@ type CrossDeviceScenario struct {
 
 // SetupCrossDeviceScenario initializes a deterministic two-root cross-device scenario.
 func SetupCrossDeviceScenario(basePath string) (*CrossDeviceScenario, error) {
-	return nil, fmt.Errorf("%w for base `%s`", ErrCrossDeviceScenarioLinuxOnly, basePath)
+	return nil, fmt.Errorf("failed to setup cross-device scenario for base `%s`: %w", basePath, ErrCrossDeviceScenarioLinuxOnly)
 }
 
 // IsCrossDevice indicates whether primary and secondary roots are on different devices.

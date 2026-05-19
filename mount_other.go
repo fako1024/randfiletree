@@ -8,15 +8,15 @@ import "fmt"
 func MountTmpfs(target string, sizeBytes int64) error {
 	_ = sizeBytes
 
-	return fmt.Errorf("%w for `%s`", ErrMountLinuxOnly, target)
+	return fmt.Errorf("failed to mount tmpfs on target `%s`: %w", target, ErrMountLinuxOnly)
 }
 
 // MountBind creates a bind mount from source to target.
 func MountBind(source, target string) error {
-	return fmt.Errorf("%w for `%s` -> `%s`", ErrMountLinuxOnly, source, target)
+	return fmt.Errorf("failed to bind mount source `%s` on target `%s`: %w", source, target, ErrMountLinuxOnly)
 }
 
 // Unmount unmounts an existing mount target.
 func Unmount(target string) error {
-	return fmt.Errorf("%w for `%s`", ErrMountLinuxOnly, target)
+	return fmt.Errorf("failed to unmount target `%s`: %w", target, ErrMountLinuxOnly)
 }
