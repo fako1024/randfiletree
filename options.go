@@ -572,6 +572,28 @@ func WithSymlinkStrategyProbabilities(probabilities map[SymlinkStrategy]float64)
 	}
 }
 
+// WithByteFileNameGenerator sets the byte-level generator used for file names.
+func WithByteFileNameGenerator(gen ByteNameGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateByteNameGenerator("byte file name generator", gen); err != nil {
+			return err
+		}
+		g.byteFileNameGen = gen
+		return nil
+	}
+}
+
+// WithByteDirNameGenerator sets the byte-level generator used for directory names.
+func WithByteDirNameGenerator(gen ByteNameGenerator) Option {
+	return func(g *Generator) error {
+		if err := validateByteNameGenerator("byte directory name generator", gen); err != nil {
+			return err
+		}
+		g.byteDirNameGen = gen
+		return nil
+	}
+}
+
 // WithSymlinkProbability sets a flat probability for symlink creation in the range [0, 1].
 func WithSymlinkProbability(probability float64) Option {
 	return func(g *Generator) error {
@@ -717,6 +739,14 @@ func validateIntRange(name string, min, max int) error {
 }
 
 func validateFileNameGenerator(name string, gen FileNameGenerator) error {
+	if gen == nil {
+		return fmt.Errorf("%s must not be nil", name)
+	}
+
+	return nil
+}
+
+func validateByteNameGenerator(name string, gen ByteNameGenerator) error {
 	if gen == nil {
 		return fmt.Errorf("%s must not be nil", name)
 	}
