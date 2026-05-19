@@ -41,6 +41,10 @@ func PathsWithOptions(a, b string, opts Options) error {
 		return err
 	}
 
+	if err := ensureDeviceIDMetadata(pathsA.nodes, pathsB.nodes, opts); err != nil {
+		return err
+	}
+
 	if err := ensureXAttrMetadata(pathsA.nodes, pathsB.nodes, opts); err != nil {
 		return err
 	}
@@ -103,6 +107,7 @@ type projectedNode struct {
 
 	DeviceMajor uint32
 	DeviceMinor uint32
+	DevID       uint64
 
 	SparseParity bool
 }
@@ -142,6 +147,10 @@ func projectNodes(nodes []Node, opts Options) []projectedNode {
 
 		if opts.CompareSparseness && node.InodeType == InodeTypeRegular {
 			projectedNode.SparseParity = node.SparseParity
+		}
+
+		if opts.CompareDeviceIDs {
+			projectedNode.DevID = node.DevID
 		}
 
 		if !opts.CompareAccessTime {
@@ -248,6 +257,26 @@ func ensureSparsenessMetadata(nodesA, nodesB []Node, opts Options) error {
 		}
 		if !node.HasAllocatedBlocks {
 			return fmt.Errorf("%w for right path `%s`", ErrSparsenessMetadataUnavailable, node.Path)
+		}
+	}
+
+	return nil
+}
+
+func ensureDeviceIDMetadata(nodesA, nodesB []Node, opts Options) error {
+	if !opts.CompareDeviceIDs {
+		return nil
+	}
+
+	for _, node := range nodesA {
+		if !node.HasDevID {
+			return fmt.Errorf("%w for left path `%s`", ErrDeviceIDMetadataUnavailable, node.Path)
+		}
+	}
+
+	for _, node := range nodesB {
+		if !node.HasDevID {
+			return fmt.Errorf("%w for right path `%s`", ErrDeviceIDMetadataUnavailable, node.Path)
 		}
 	}
 
