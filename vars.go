@@ -5,11 +5,6 @@ import (
 	"math/rand"
 )
 
-const (
-	NameMaxBytes = 255
-	PathMaxBytes = 4096
-)
-
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -159,13 +154,14 @@ func ByteNamePresetInvalidUTF8(r *rand.Rand, byteLen int) string {
 	return string(name)
 }
 
+var combiningBytes = []byte{0xCC, 0x81, 0xCC, 0x82, 0xCC, 0x83, 0xCC, 0x84}
+
 func ByteNamePresetUnicodeNormalization(r *rand.Rand, byteLen int) string {
 	if byteLen < 2 {
 		byteLen = 2
 	}
 	name := make([]byte, byteLen)
 	nCombining := 1 + r.Intn(minInt(byteLen-1, 3))
-	combiningBytes := []byte{0xCC, 0x81, 0xCC, 0x82, 0xCC, 0x83, 0xCC, 0x84}
 	pos := 0
 	name[pos] = 'e'
 	pos++
