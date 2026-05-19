@@ -35,12 +35,20 @@ func SetupCrossDeviceScenario(basePath string) (*CrossDeviceScenario, error) {
 		return nil, ErrBasePathEmpty
 	}
 
+	if err := ensureNoSymlinkPathComponents(basePath); err != nil {
+		return nil, err
+	}
+
 	scenario := &CrossDeviceScenario{
 		BasePath: filepath.Clean(basePath),
 	}
 
 	if err := os.MkdirAll(scenario.BasePath, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create cross-device scenario base `%s`: %w", scenario.BasePath, err)
+	}
+
+	if err := ensureScenarioDirectory(scenario.BasePath, "base path"); err != nil {
+		return nil, err
 	}
 
 	scenario.Primary.Path = filepath.Join(scenario.BasePath, "left")
@@ -51,6 +59,13 @@ func SetupCrossDeviceScenario(basePath string) (*CrossDeviceScenario, error) {
 	}
 	if err := os.MkdirAll(scenario.Secondary.Path, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create cross-device scenario secondary root `%s`: %w", scenario.Secondary.Path, err)
+	}
+
+	if err := ensureScenarioDirectory(scenario.Primary.Path, "primary root"); err != nil {
+		return nil, err
+	}
+	if err := ensureScenarioDirectory(scenario.Secondary.Path, "secondary root"); err != nil {
+		return nil, err
 	}
 
 	primaryDev, err := pathDeviceID(scenario.Primary.Path)
@@ -143,17 +158,17 @@ func (s *CrossDeviceScenario) Close() error {
 	if s.secondaryMounted {
 		if err := Unmount(s.Secondary.Path); err != nil {
 			errs = append(errs, err)
+		} else {
+			s.secondaryMounted = false
 		}
-
-		s.secondaryMounted = false
 	}
 
 	if s.bindSourcePath != "" {
 		if err := os.RemoveAll(s.bindSourcePath); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove cross-device bind source `%s`: %w", s.bindSourcePath, err))
+		} else {
+			s.bindSourcePath = ""
 		}
-
-		s.bindSourcePath = ""
 	}
 
 	if len(errs) > 0 {
@@ -232,4 +247,63 @@ func pathDeviceID(path string) (uint64, error) {
 	}
 
 	return uint64(stat.Dev), nil
+}
+
+func ensureNoSymlinkPathComponents(path string) error {
+	cleanPath := filepath.Clean(path)
+	absPath := cleanPath
+	if !filepath.IsAbs(absPath) {
+		resolvedPath, err := filepath.Abs(absPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve base path `%s`: %w", path, err)
+		}
+
+		absPath = resolvedPath
+	}
+
+	currentPath := string(filepath.Separator)
+	components := strings.Split(strings.TrimPrefix(absPath, string(filepath.Separator)), string(filepath.Separator))
+	for _, component := range components {
+		if component == "" || component == "." {
+			continue
+		}
+
+		currentPath = filepath.Join(currentPath, component)
+
+		info, err := os.Lstat(currentPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+
+			return fmt.Errorf("failed to inspect base path component `%s`: %w", currentPath, err)
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("base path component `%s`: %w", currentPath, ErrBasePathSymlink)
+		}
+
+		if !info.IsDir() {
+			return fmt.Errorf("base path component `%s` is not a directory", currentPath)
+		}
+	}
+
+	return nil
+}
+
+func ensureScenarioDirectory(path, label string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("failed to inspect cross-device scenario %s `%s`: %w", label, path, err)
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("cross-device scenario %s `%s`: %w", label, path, ErrBasePathSymlink)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("cross-device scenario %s `%s` is not a directory", label, path)
+	}
+
+	return nil
 }

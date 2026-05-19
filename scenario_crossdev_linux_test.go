@@ -12,6 +12,91 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestSetupCrossDeviceScenarioRejectsSymlinkBasePath(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	symlinkPath := filepath.Join(base, "base-link")
+	require.NoError(t, os.MkdirAll(target, 0o750))
+	require.NoError(t, os.Symlink(target, symlinkPath))
+
+	_, err := SetupCrossDeviceScenario(symlinkPath)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBasePathSymlink)
+}
+
+func TestSetupCrossDeviceScenarioRejectsSymlinkParentPath(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	symlinkParent := filepath.Join(base, "parent-link")
+	require.NoError(t, os.MkdirAll(target, 0o750))
+	require.NoError(t, os.Symlink(target, symlinkParent))
+
+	_, err := SetupCrossDeviceScenario(filepath.Join(symlinkParent, "child"))
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBasePathSymlink)
+}
+
+func TestCrossDeviceScenarioCloseKeepsMountStateOnUnmountFailure(t *testing.T) {
+	scenario := &CrossDeviceScenario{
+		Secondary: DeviceRoot{Path: t.TempDir()},
+
+		secondaryMounted: true,
+	}
+
+	err := scenario.Close()
+	require.Error(t, err)
+	require.True(t, scenario.secondaryMounted)
+}
+
+func TestCrossDeviceScenarioCloseKeepsBindSourceStateOnCleanupFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires unprivileged test user")
+	}
+
+	parent := t.TempDir()
+	bindSource := filepath.Join(parent, "bind-source")
+	require.NoError(t, os.MkdirAll(bindSource, 0o700))
+	require.NoError(t, os.Chmod(parent, 0o500))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chmod(parent, 0o700))
+		require.NoError(t, os.RemoveAll(bindSource))
+	})
+
+	scenario := &CrossDeviceScenario{
+		bindSourcePath: bindSource,
+	}
+
+	err := scenario.Close()
+	require.Error(t, err)
+	require.Equal(t, bindSource, scenario.bindSourcePath)
+}
+
+func TestCrossDeviceScenarioCloseIsRetryableOnUnmountFailure(t *testing.T) {
+	scenario := requireCrossDeviceScenario(t)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(scenario.Secondary.Path, "busy"), 0o750))
+	held, err := os.Open(filepath.Join(scenario.Secondary.Path, "busy"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if held != nil {
+			_ = held.Close()
+		}
+	})
+
+	err = scenario.Close()
+	if err == nil {
+		require.NoError(t, held.Close())
+		held = nil
+		t.Skip("unmount did not fail while a directory handle was open")
+	}
+
+	require.True(t, scenario.secondaryMounted || scenario.bindSourcePath != "")
+	require.NoError(t, held.Close())
+	held = nil
+
+	require.NoError(t, scenario.Close())
+}
+
 func TestSetupCrossDeviceScenarioProducesDistinctDevices(t *testing.T) {
 	scenario := requireCrossDeviceScenario(t)
 	require.NotEqual(t, scenario.Primary.DeviceID, scenario.Secondary.DeviceID)
