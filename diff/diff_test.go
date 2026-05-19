@@ -260,6 +260,31 @@ func TestPathsWithOptionsAccessTimeAvailability(t *testing.T) {
 	require.ErrorContains(t, err, "access-time comparison requested but metadata unavailable")
 }
 
+func TestPathsWithOptionsDeviceIDAvailability(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	pathA := filepath.Join(base, "a")
+	pathB := filepath.Join(base, "b")
+	require.NoError(t, os.MkdirAll(pathA, 0o750))
+	require.NoError(t, os.MkdirAll(pathB, 0o750))
+
+	require.NoError(t, os.WriteFile(filepath.Join(pathA, "file.txt"), []byte("same"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pathB, "file.txt"), []byte("same"), 0o600))
+
+	opts := DefaultOptions()
+	opts.CompareDeviceIDs = true
+
+	err := PathsWithOptions(pathA, pathB, opts)
+	if runtime.GOOS == "linux" {
+		require.NoError(t, err)
+		return
+	}
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "device-ID comparison requested but metadata unavailable")
+}
+
 func TestPathsWithOptionsAccessTimeToggle(t *testing.T) {
 	t.Parallel()
 
@@ -385,6 +410,12 @@ func TestEnsureMetadataAvailabilityErrors(t *testing.T) {
 	err = ensureACLMetadata(nodes, nodes, optsACL)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrACLMetadataUnavailable)
+
+	optsDevice := DefaultOptions()
+	optsDevice.CompareDeviceIDs = true
+	err = ensureDeviceIDMetadata(nodes, nodes, optsDevice)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrDeviceIDMetadataUnavailable)
 }
 
 func TestRunMetadataHooksXAttrDeterministicOrder(t *testing.T) {
