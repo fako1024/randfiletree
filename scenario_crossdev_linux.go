@@ -71,7 +71,8 @@ func SetupCrossDeviceScenario(basePath string) (*CrossDeviceScenario, error) {
 
 	attempts := make([]string, 0, 2)
 
-	if err := MountTmpfs(scenario.Secondary.Path, defaultTmpfsMountSizeBytes); err == nil {
+	err = MountTmpfs(scenario.Secondary.Path, defaultTmpfsMountSizeBytes)
+	if err == nil {
 		scenario.secondaryMounted = true
 		if err := scenario.refreshDeviceIDs(); err != nil {
 			_ = scenario.Close()
@@ -86,14 +87,17 @@ func SetupCrossDeviceScenario(basePath string) (*CrossDeviceScenario, error) {
 		if err := scenario.Close(); err != nil {
 			return nil, err
 		}
-	} else {
+	}
+
+	if err != nil {
 		attempts = append(attempts, fmt.Sprintf("tmpfs mount failed: %v", err))
 		if !errors.Is(err, ErrMountPermissionDenied) && !errors.Is(err, ErrMountUnsupported) {
 			return nil, err
 		}
 	}
 
-	if err := scenario.tryBindMountFallback(); err == nil {
+	err = scenario.tryBindMountFallback()
+	if err == nil {
 		if err := scenario.refreshDeviceIDs(); err != nil {
 			_ = scenario.Close()
 			return nil, err
@@ -107,7 +111,9 @@ func SetupCrossDeviceScenario(basePath string) (*CrossDeviceScenario, error) {
 		if err := scenario.Close(); err != nil {
 			return nil, err
 		}
-	} else {
+	}
+
+	if err != nil {
 		attempts = append(attempts, fmt.Sprintf("bind mount fallback failed: %v", err))
 		if !errors.Is(err, ErrMountPermissionDenied) && !errors.Is(err, ErrMountUnsupported) {
 			return nil, err
