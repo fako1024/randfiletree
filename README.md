@@ -58,6 +58,40 @@ For configurable strictness, use `diff.PathsWithOptions`:
   ownership, access-time, hardlink topology, and future xattr/ACL comparator hooks.
 - diff now includes inode-type parity, and for char/block devices compares major/minor numbers.
 
+## Cross-Device and Mount-Boundary Scenarios (Linux)
+
+The package provides Linux helpers to exercise cross-device semantics explicitly:
+
+- `SetupCrossDeviceScenario(basePath)` sets up sibling roots (`left`/`right`) and
+  attempts to ensure they are on distinct devices
+- mount helpers:
+  - `MountTmpfs(target, sizeBytes)`
+  - `MountBind(source, target)`
+  - `Unmount(target)`
+
+Cross-device scenario setup is capability-aware:
+
+- prefers `tmpfs` mount for the secondary root
+- falls back to bind-mounting a distinct-device source where available
+- validates `basePath` and existing parent components as real directories (symlink paths are rejected)
+- returns explicit unavailable errors when mount privileges or features are missing
+
+Resource cleanup is explicit:
+
+- call `scenario.Close()` to tear down mounts and temporary bind sources
+- if teardown fails, cleanup state is preserved so `Close()` can be retried
+
+This allows deterministic validation of Linux mount-boundary semantics such as:
+
+- rename across devices => `EXDEV`
+- hardlink creation across devices rejected (`EXDEV`)
+
+`diff.PathsWithOptions` also supports optional device-ID parity checks via:
+
+- `diff.Options{CompareDeviceIDs: true}`
+
+`CompareDeviceIDs` defaults to `false` to preserve historical behavior.
+
 ## Linux Metadata Controls
 
 The generator can now apply Linux metadata controls for created files and

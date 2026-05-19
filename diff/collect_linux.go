@@ -21,6 +21,8 @@ func collectPlatformMetadata(path string, node *Node, opts Options) error {
 	node.UID = stat.Uid
 	node.GID = stat.Gid
 	node.HasOwnership = true
+	node.DevID = uint64(stat.Dev)
+	node.HasDevID = true
 	node.Atime = stat.Atim.Sec
 	node.AtimeNsec = unix.TimespecToNsec(stat.Atim)
 	node.HasAccessTime = true

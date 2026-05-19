@@ -9,6 +9,7 @@ var (
 	ErrXAttrMetadataUnavailable      = errors.New("xattr comparison requested but metadata unavailable")
 	ErrACLMetadataUnavailable        = errors.New("ACL comparison requested but metadata unavailable")
 	ErrSparsenessMetadataUnavailable = errors.New("sparseness comparison requested but metadata unavailable")
+	ErrDeviceIDMetadataUnavailable   = errors.New("device-ID comparison requested but metadata unavailable")
 
 	ErrXAttrCollectionUnsupported      = errors.New("xattr metadata collection unsupported")
 	ErrACLCollectionUnsupported        = errors.New("ACL metadata collection unsupported")

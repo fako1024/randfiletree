@@ -23,6 +23,7 @@ type Options struct {
 	CompareOwnership        bool
 	CompareAccessTime       bool
 	CompareHardlinkTopology bool
+	CompareDeviceIDs        bool
 	CompareSparseness       bool
 
 	CompareXAttrs   bool
@@ -40,6 +41,7 @@ func DefaultOptions() Options {
 		CompareOwnership:        false,
 		CompareAccessTime:       false,
 		CompareHardlinkTopology: true,
+		CompareDeviceIDs:        false,
 		CompareSparseness:       false,
 		CompareXAttrs:           false,
 		CompareACLs:             false,
