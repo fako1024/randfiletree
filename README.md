@@ -137,3 +137,27 @@ Important:
 - xattr and ACL capability failures are explicit (permission denied, unsupported filesystem)
 - `diff.PathsWithOptions` can now compare xattr and ACL parity deterministically with
   `CompareXAttrs` and `CompareACLs` options
+
+## Byte-Accurate Name Generation
+
+The generator supports byte-level filename generation to cover Linux path edge cases
+that are common sources of backup/restore failures.
+
+- byte-level generators via `WithByteFileNameGenerator(...)` and `WithByteDirNameGenerator(...)`
+- `ByteNameGeneratorAlphabet(alphabet []byte)` for custom byte alphabets
+- named edge-case presets:
+  - `ByteNamePresetLeadingSpaces` - names starting with spaces
+  - `ByteNamePresetTrailingSpaces` - names ending with spaces
+  - `ByteNamePresetLeadingDots` - hidden-file-style names with leading dots
+  - `ByteNamePresetNewlineTab` - names containing `\n`, `\r`, `\t`
+  - `ByteNamePresetControlChars` - names with ASCII control characters (0x01-0x1F)
+  - `ByteNamePresetInvalidUTF8` - names with invalid UTF-8 byte sequences
+  - `ByteNamePresetUnicodeNormalization` - names with combining characters
+
+Important:
+
+- byte generators produce raw byte strings that may contain invalid UTF-8
+- NUL (`\x00`) and slash (`/`) bytes are never generated (Linux path constraints)
+- `NameMaxBytes` (255) and `PathMaxBytes` (4096) constants are exported for boundary testing
+- diff error output escapes non-printable bytes as `\xNN` for readability
+- edge-case names are deterministic under fixed seed

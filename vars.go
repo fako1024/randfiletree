@@ -5,23 +5,27 @@ import (
 	"math/rand"
 )
 
-const ()
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 var (
-	// FileNameAlphabetBasic represents a "safe" alphabet restricted to lowercase/uppercase characters and numbers
 	FileNameAlphabetBasic = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890")
 
-	// FileNameAlphabetLinux represents an alphabet compatible with common linux systems
 	FileNameAlphabetLinux = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890!@#$%^&*()-_+= ;.,")
+
+	ByteNameAlphabetEdgeCase = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890!@#$%^&*()-_+= ;.,")
 )
 
-// StringGenerator denotes a generic generator function for strings (e.g. for filenames)
 type StringGenerator func(r *rand.Rand, length int) string
 
-// FileNameGenerator is basically just a string generator
 type FileNameGenerator = StringGenerator
 
-// StringGeneratorAlphabet generates a string of requested length based on a provided alphabet
+type ByteNameGenerator func(r *rand.Rand, byteLen int) string
+
 func StringGeneratorAlphabet(alphabet []rune) StringGenerator {
 	return func(r *rand.Rand, length int) string {
 		b := make([]rune, length)
@@ -30,6 +34,154 @@ func StringGeneratorAlphabet(alphabet []rune) StringGenerator {
 		}
 		return string(b)
 	}
+}
+
+func ByteNameGeneratorAlphabet(alphabet []byte) ByteNameGenerator {
+	return func(r *rand.Rand, byteLen int) string {
+		b := make([]byte, byteLen)
+		for i := range b {
+			b[i] = alphabet[r.Intn(len(alphabet))]
+		}
+		return string(b)
+	}
+}
+
+func ByteNamePresetLeadingSpaces(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	nSpaces := 1 + r.Intn(minInt(byteLen-1, 5))
+	name := make([]byte, byteLen)
+	for i := 0; i < nSpaces; i++ {
+		name[i] = ' '
+	}
+	for i := nSpaces; i < byteLen; i++ {
+		name[i] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+	}
+	return string(name)
+}
+
+func ByteNamePresetTrailingSpaces(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	nSpaces := 1 + r.Intn(minInt(byteLen-1, 5))
+	name := make([]byte, byteLen)
+	for i := 0; i < byteLen-nSpaces; i++ {
+		name[i] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+	}
+	for i := byteLen - nSpaces; i < byteLen; i++ {
+		name[i] = ' '
+	}
+	return string(name)
+}
+
+func ByteNamePresetLeadingDots(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	nDots := 1 + r.Intn(minInt(byteLen-1, 3))
+	name := make([]byte, byteLen)
+	for i := 0; i < nDots; i++ {
+		name[i] = '.'
+	}
+	for i := nDots; i < byteLen; i++ {
+		name[i] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+	}
+	return string(name)
+}
+
+func ByteNamePresetNewlineTab(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	name := make([]byte, byteLen)
+	nSpecial := 1 + r.Intn(minInt(byteLen-1, 3))
+	specialChars := []byte{'\n', '\r', '\t'}
+	for i := 0; i < nSpecial; i++ {
+		name[i] = specialChars[r.Intn(len(specialChars))]
+	}
+	for i := nSpecial; i < byteLen; i++ {
+		name[i] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+	}
+	return string(name)
+}
+
+func ByteNamePresetControlChars(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	name := make([]byte, byteLen)
+	nControl := 1 + r.Intn(minInt(byteLen-1, 4))
+	for i := 0; i < nControl; i++ {
+		name[i] = byte(1 + r.Intn(31))
+	}
+	for i := nControl; i < byteLen; i++ {
+		name[i] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+	}
+	return string(name)
+}
+
+func ByteNamePresetInvalidUTF8(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	name := make([]byte, byteLen)
+	nInvalid := 1 + r.Intn(minInt(byteLen-1, 4))
+	invalidSequences := [][]byte{
+		{0x80}, {0xBF}, {0xC0}, {0xC1},
+		{0xF5}, {0xFF},
+		{0xC2, 0x00}, {0xE0, 0x00},
+	}
+	pos := 0
+	for i := 0; i < nInvalid && pos < byteLen; i++ {
+		seq := invalidSequences[r.Intn(len(invalidSequences))]
+		for _, b := range seq {
+			if pos >= byteLen {
+				break
+			}
+			if b == 0 {
+				b = 0x80
+			}
+			name[pos] = b
+			pos++
+		}
+	}
+	for pos < byteLen {
+		name[pos] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+		pos++
+	}
+	return string(name)
+}
+
+var combiningBytes = []byte{0xCC, 0x81, 0xCC, 0x82, 0xCC, 0x83, 0xCC, 0x84}
+
+func ByteNamePresetUnicodeNormalization(r *rand.Rand, byteLen int) string {
+	if byteLen < 2 {
+		byteLen = 2
+	}
+	name := make([]byte, byteLen)
+	nCombining := 1 + r.Intn(minInt(byteLen-1, 3))
+	pos := 0
+	name[pos] = 'e'
+	pos++
+	for i := 0; i < nCombining && pos+1 < byteLen; i++ {
+		name[pos] = combiningBytes[i*2]
+		pos++
+		if pos < byteLen {
+			name[pos] = combiningBytes[i*2+1]
+			pos++
+		}
+	}
+	for pos < byteLen {
+		name[pos] = ByteNameAlphabetEdgeCase[r.Intn(len(ByteNameAlphabetEdgeCase))]
+		pos++
+	}
+	return string(name)
+}
+
+func ByteNameGeneratorPreset(preset func(r *rand.Rand, byteLen int) string) ByteNameGenerator {
+	return preset
 }
 
 // NumberGenerator denotes a generic generator function for integers (e.g. for length of strings or data)

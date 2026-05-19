@@ -47,4 +47,6 @@ var (
 	ErrACLEntryContainsNUL    = errors.New("ACL entry must not contain NUL bytes")
 	ErrACLEntryEmpty          = errors.New("ACL entry must not be empty")
 	ErrACLEntryContainsComma  = errors.New("ACL entry must not contain comma")
+
+	ErrByteNameAlphabetInvalid = errors.New("byte name alphabet must not contain NUL or '/' bytes")
 )
