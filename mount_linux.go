@@ -47,7 +47,7 @@ func mapMountError(err error) error {
 	switch {
 	case errors.Is(err, unix.EPERM), errors.Is(err, unix.EACCES):
 		return ErrMountPermissionDenied
-	case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.EINVAL), errors.Is(err, unix.ENODEV):
+	case errors.Is(err, unix.ENOTSUP), errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.ENODEV):
 		return ErrMountUnsupported
 	default:
 		return err

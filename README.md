@@ -73,7 +73,13 @@ Cross-device scenario setup is capability-aware:
 
 - prefers `tmpfs` mount for the secondary root
 - falls back to bind-mounting a distinct-device source where available
+- validates `basePath` and existing parent components as real directories (symlink paths are rejected)
 - returns explicit unavailable errors when mount privileges or features are missing
+
+Resource cleanup is explicit:
+
+- call `scenario.Close()` to tear down mounts and temporary bind sources
+- if teardown fails, cleanup state is preserved so `Close()` can be retried
 
 This allows deterministic validation of Linux mount-boundary semantics such as:
 
