@@ -37,6 +37,8 @@ type Node struct {
 	HasAccessTime bool
 
 	InodeType InodeType
+	DevID     uint64
+	HasDevID  bool
 
 	AllocatedBlocks    int64
 	HasAllocatedBlocks bool

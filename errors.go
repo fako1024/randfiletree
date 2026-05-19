@@ -22,6 +22,12 @@ var (
 	ErrSpecialFileUnsupported      = errors.New("special file generation is unsupported on this filesystem or platform")
 	ErrSpecialFileLinuxOnly        = errors.New("special file generation is only supported on linux")
 
+	ErrMountPermissionDenied          = errors.New("insufficient privileges to perform mount operation")
+	ErrMountUnsupported               = errors.New("mount operation is unsupported on this filesystem or platform")
+	ErrMountLinuxOnly                 = errors.New("mount operations are only supported on linux")
+	ErrCrossDeviceScenarioLinuxOnly   = errors.New("cross-device scenarios are only supported on linux")
+	ErrCrossDeviceScenarioUnavailable = errors.New("cross-device scenario is unavailable in this environment")
+
 	ErrContentPatternRepeatedBlockEmpty = errors.New("repeated-block content pattern requires non-empty data block")
 
 	ErrOwnershipMetadataConfigurationIncomplete = errors.New("ownership metadata configuration requires both uid and gid generators")
