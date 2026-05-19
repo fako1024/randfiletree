@@ -20,6 +20,7 @@ func collectPlatformMetadata(path string, node *Node, opts Options) error {
 	node.HasXAttrs = false
 	node.HasACL = false
 	node.HasAllocatedBlocks = false
+	node.HasDevID = false
 
 	return nil
 }
