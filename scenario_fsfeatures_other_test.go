@@ -24,5 +24,5 @@ func TestProbeFilesystemFeaturesLinuxOnlyStatuses(t *testing.T) {
 	require.Len(t, statuses, 1)
 	require.Equal(t, FilesystemFeatureImmutable, statuses[0].Feature)
 	require.Equal(t, FilesystemFeatureAvailabilityUnsupported, statuses[0].Availability)
-	require.ErrorContains(t, statuses[0].Diagnostic, ErrFilesystemFeatureScenarioLinuxOnly.Error())
+	require.Contains(t, statuses[0].Diagnostic, ErrFilesystemFeatureScenarioLinuxOnly.Error())
 }
