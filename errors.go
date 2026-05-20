@@ -28,6 +28,12 @@ var (
 	ErrCrossDeviceScenarioLinuxOnly   = errors.New("cross-device scenarios are only supported on linux")
 	ErrCrossDeviceScenarioUnavailable = errors.New("cross-device scenario is unavailable in this environment")
 
+	ErrFilesystemFeatureScenarioLinuxOnly   = errors.New("filesystem feature scenarios are only supported on linux")
+	ErrFilesystemFeatureSelectionEmpty      = errors.New("filesystem feature scenario requires at least one opt-in feature")
+	ErrFilesystemFeaturePermissionDenied    = errors.New("insufficient privileges to apply requested filesystem feature")
+	ErrFilesystemFeatureUnsupported         = errors.New("filesystem feature is unsupported on this filesystem or platform")
+	ErrFilesystemFeatureScenarioUnavailable = errors.New("filesystem feature scenario is unavailable in this environment")
+
 	ErrContentPatternRepeatedBlockEmpty = errors.New("repeated-block content pattern requires non-empty data block")
 
 	ErrOwnershipMetadataConfigurationIncomplete = errors.New("ownership metadata configuration requires both uid and gid generators")
