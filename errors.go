@@ -17,6 +17,8 @@ var (
 	ErrContentPatternProbabilitiesEmpty       = errors.New("content pattern probabilities must not be empty")
 	ErrContentPatternProbabilitiesNonPositive = errors.New("sum of content pattern probabilities must be > 0")
 	ErrContentPatternConfigurationIncomplete  = errors.New("content pattern configuration requires both pattern and logical size generators")
+	ErrPlanEntryLimitInvalid                  = errors.New("plan entry limit must be > 0")
+	ErrPlanEntryLimitExceeded                 = errors.New("planned entry limit exceeded")
 
 	ErrSpecialFilePermissionDenied = errors.New("insufficient privileges to create requested special file")
 	ErrSpecialFileUnsupported      = errors.New("special file generation is unsupported on this filesystem or platform")
