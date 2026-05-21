@@ -131,12 +131,46 @@ func GenerateOperations(basePath string, opts OperationGenerationOptions) ([]Ope
 	return ops, nil
 }
 
+// OperationApplyOptions defines optional deterministic execution behavior for ApplyOperations.
+type OperationApplyOptions struct {
+	// StartIndex resumes execution at ops[StartIndex].
+	//
+	// This allows deterministic continuation/retry tests after partial failures.
+	StartIndex int
+
+	// FaultProfile injects deterministic failures at matching execution points.
+	FaultProfile FaultProfile
+}
+
+func (o OperationApplyOptions) validate(operationCount int) error {
+	if o.StartIndex < 0 {
+		return ErrOperationStartIndexNegative
+	}
+	if o.StartIndex > operationCount {
+		return ErrOperationStartIndexOutOfRange
+	}
+
+	if err := o.FaultProfile.validate(); err != nil {
+		return fmt.Errorf("invalid operation apply fault profile: %w", err)
+	}
+
+	return nil
+}
+
 // ApplyOperations executes operations in strict order and fails fast.
 func ApplyOperations(basePath string, ops []Operation) error {
+	return ApplyOperationsWithOptions(basePath, ops, OperationApplyOptions{})
+}
+
+// ApplyOperationsWithOptions executes operations in strict order and fails fast.
+func ApplyOperationsWithOptions(basePath string, ops []Operation, opts OperationApplyOptions) error {
 	if strings.TrimSpace(basePath) == "" {
 		return ErrBasePathEmpty
 	}
-	if len(ops) == 0 {
+	if err := opts.validate(len(ops)); err != nil {
+		return err
+	}
+	if opts.StartIndex == len(ops) {
 		return nil
 	}
 
@@ -151,10 +185,21 @@ func ApplyOperations(basePath string, ops []Operation) error {
 		return fmt.Errorf("base path `%s` is not a directory", basePath)
 	}
 
-	for i, op := range ops {
+	execCtx, err := newExecutionContext(opts.FaultProfile)
+	if err != nil {
+		return err
+	}
+
+	for i := opts.StartIndex; i < len(ops); i++ {
+		op := ops[i]
+
 		normalized, normalizeErr := normalizeOperation(op)
 		if normalizeErr != nil {
 			return newOperationApplyError(i, op, ops, fmt.Errorf("invalid operation: %w", normalizeErr))
+		}
+
+		if err := execCtx.before(FaultScopeMutation, i, normalized.Kind.String(), normalized.Path); err != nil {
+			return newOperationApplyError(i, normalized, ops, err)
 		}
 
 		if err := applyOperation(basePath, normalized); err != nil {
