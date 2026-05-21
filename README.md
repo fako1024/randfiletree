@@ -13,6 +13,35 @@ Planning enforces unique generated paths with bounded retries. If unique path pl
 be completed, `Run()` returns `ErrPlanPathCollisionExhausted` instead of silently under-generating
 the tree.
 
+### Performance Harness
+
+Large-scale planning and apply diagnostics are exposed via `RunWithMetrics(opts)`:
+
+- `Nodes` - planned entry count
+- `Retries` / `Collisions` - bounded unique-path retry pressure
+- `HardlinkGroups` - planned hardlink topology group count
+- `AppliedEntries` / `FinalizedDirectories` - apply-phase execution counts
+- `PlanningElapsed`, `ApplyElapsed`, and total `Elapsed`
+
+Planner memory growth is bounded by a configurable entry ceiling:
+
+- default plan entry limit: `100000`
+- override with `WithPlanEntryLimit(limit)`
+- exceeding the limit fails deterministically with `ErrPlanEntryLimitExceeded`
+
+Benchmark suites are available locally (not run in CI by default):
+
+- generator scales: `BenchmarkGeneratorRunScales` (`performance_test.go`)
+- diff scales: `BenchmarkDiffPathsScales` (`diff/performance_test.go`)
+- run with alloc stats:
+  - `go test -run '^$' -bench . -benchmem ./...`
+
+Regression guardrail guidance:
+
+- track `nodes/op`, `retries/op`, `collisions/op` and benchmark latency trends
+- treat sustained increases in retries/collisions at the same scale as planning regressions
+- compare benchmark output across commits on the same machine/profile
+
 ## Link Topologies
 
 The generator supports first-class link topology controls:
