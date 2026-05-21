@@ -76,8 +76,31 @@ func New(basePath string) *Generator {
 
 // Run generates a new tree (or adds to an existing one) according to the defined rules
 func (g *Generator) Run() error {
+	return g.RunWithOptions(RunOptions{})
+}
+
+// RunOptions defines optional deterministic execution behavior for Run.
+type RunOptions struct {
+	// FaultProfile injects deterministic failures at matching execution points.
+	FaultProfile FaultProfile
+}
+
+func (o RunOptions) validate() error {
+	if err := o.FaultProfile.validate(); err != nil {
+		return fmt.Errorf("invalid run fault profile: %w", err)
+	}
+
+	return nil
+}
+
+// RunWithOptions generates a new tree according to the defined rules and execution options.
+func (g *Generator) RunWithOptions(opts RunOptions) error {
 	if g == nil {
 		return ErrNilGenerator
+	}
+
+	if err := opts.validate(); err != nil {
+		return err
 	}
 
 	if g.hasNoConfiguration() {
@@ -93,7 +116,12 @@ func (g *Generator) Run() error {
 		return err
 	}
 
-	if err := g.applyRunPlan(plan); err != nil {
+	execCtx, err := newExecutionContext(opts.FaultProfile)
+	if err != nil {
+		return err
+	}
+
+	if err := g.applyRunPlan(plan, execCtx); err != nil {
 		return err
 	}
 
@@ -111,11 +139,16 @@ func (g *Generator) GenerateOperations(opts OperationGenerationOptions) ([]Opera
 
 // ApplyOperations applies operation streams against the generator base path.
 func (g *Generator) ApplyOperations(ops []Operation) error {
+	return g.ApplyOperationsWithOptions(ops, OperationApplyOptions{})
+}
+
+// ApplyOperationsWithOptions applies operation streams against the generator base path.
+func (g *Generator) ApplyOperationsWithOptions(ops []Operation, opts OperationApplyOptions) error {
 	if g == nil {
 		return ErrNilGenerator
 	}
 
-	return ApplyOperations(g.basePath, ops)
+	return ApplyOperationsWithOptions(g.basePath, ops, opts)
 }
 
 func (g *Generator) hasNoConfiguration() bool {
