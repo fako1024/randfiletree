@@ -63,6 +63,19 @@ func WithRunMode(mode RunMode) Option {
 	}
 }
 
+// WithPlanEntryLimit sets the maximum number of planned entries per run.
+func WithPlanEntryLimit(limit int) Option {
+	return func(g *Generator) error {
+		if limit <= 0 {
+			return ErrPlanEntryLimitInvalid
+		}
+
+		g.planEntryLimit = limit
+
+		return nil
+	}
+}
+
 // WithDirNameGenerator sets the generator used for directory names.
 func WithDirNameGenerator(gen FileNameGenerator) Option {
 	return func(g *Generator) error {
