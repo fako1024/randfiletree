@@ -27,6 +27,13 @@ func TestConfigureAppliesOptions(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithPlanEntryLimit",
+			option: WithPlanEntryLimit(1234),
+			assert: func(t *testing.T, g *Generator) {
+				require.Equal(t, 1234, g.planEntryLimit)
+			},
+		},
+		{
 			name:   "WithSeed",
 			option: WithSeed(123),
 			assert: func(t *testing.T, g *Generator) {
@@ -440,6 +447,11 @@ func TestConfigureRejectsInvalidOptionsWithoutPanic(t *testing.T) {
 			name:        "InvalidRunMode",
 			option:      WithRunMode(RunMode(255)),
 			errContains: "run mode must be one of append, strict, replace",
+		},
+		{
+			name:        "InvalidPlanEntryLimit",
+			option:      WithPlanEntryLimit(0),
+			errContains: "plan entry limit must be > 0",
 		},
 		{
 			name:        "NilOption",
