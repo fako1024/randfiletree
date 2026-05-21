@@ -61,6 +61,10 @@ var (
 	ErrACLEntryContainsComma  = errors.New("ACL entry must not contain comma")
 
 	ErrByteNameAlphabetInvalid = errors.New("byte name alphabet must not contain NUL or '/' bytes")
+
+	ErrFaultInjected                 = errors.New("fault injected")
+	ErrOperationStartIndexNegative   = errors.New("operation start index must be >= 0")
+	ErrOperationStartIndexOutOfRange = errors.New("operation start index exceeds operation count")
 )
 
 func joinErrors(errs []error) error {
