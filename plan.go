@@ -537,7 +537,7 @@ func (state *planState) materializeHardlinkGroups() []plannedHardlinkGroup {
 	return groups
 }
 
-func (g *Generator) applyRunPlan(plan runPlan) error {
+func (g *Generator) applyRunPlan(plan runPlan, execCtx executionContext) error {
 	switch g.runMode {
 	case RunModeAppend:
 		// no pre-step required
@@ -553,7 +553,11 @@ func (g *Generator) applyRunPlan(plan runPlan) error {
 
 	createdDirs := make(map[string]plannedEntry)
 
-	for _, entry := range plan.entries {
+	for i, entry := range plan.entries {
+		if err := execCtx.before(FaultScopeRun, i, plannedEntryTypeLabel(entry.typeID), entry.path); err != nil {
+			return err
+		}
+
 		created, err := g.applyPlannedEntry(entry)
 		if err != nil {
 			return err
@@ -573,12 +577,33 @@ func (g *Generator) applyRunPlan(plan runPlan) error {
 			continue
 		}
 
+		if err := execCtx.before(FaultScopeRun, len(plan.entries)+i, "finalize-directory-metadata", entry.path); err != nil {
+			return err
+		}
+
 		if err := applyMetadata(entry.path, entry.mode, entry.metadata); err != nil {
 			return fmt.Errorf("failed to finalize metadata for planned directory `%s`: %w", entry.path, err)
 		}
 	}
 
 	return nil
+}
+
+func plannedEntryTypeLabel(typeID plannedEntryType) string {
+	switch typeID {
+	case plannedEntryTypeDir:
+		return "create-dir"
+	case plannedEntryTypeFile:
+		return "create-file"
+	case plannedEntryTypeSymlink:
+		return "create-symlink"
+	case plannedEntryTypeHardlink:
+		return "create-hardlink"
+	case plannedEntryTypeSpecial:
+		return "create-special"
+	default:
+		return fmt.Sprintf("unknown-entry(%d)", typeID)
+	}
 }
 
 func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {

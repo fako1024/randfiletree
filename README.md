@@ -169,10 +169,25 @@ Important:
 `randfiletree` supports deterministic mutation streams for multi-snapshot tests.
 
 - Define explicit `Operation` values and apply them with `ApplyOperations(basePath, ops)`.
+- Use `ApplyOperationsWithOptions(basePath, ops, opts)` for deterministic
+  resume/retry and fault-injection runs.
 - Generate deterministic streams from a baseline tree with
   `GenerateOperations(basePath, opts)` or `(*Generator).GenerateOperations(opts)`.
 - Export replay specs for CI diagnostics with `ExportOperationSpec(ops)` and parse
   with `ParseOperationSpec(spec)`.
+
+Deterministic fault injection is opt-in via `FaultProfile` rules:
+
+- fail at Nth matching execution point (`FaultRule{Nth: ...}`)
+- scope matching (`FaultScopeMutation`, `FaultScopeRun`, or `FaultScopeAny`)
+- optional operation kind and path pattern matching
+- injected failures return `FaultInjectionError` with scope, kind, path, and index
+
+Mutation resume/retry hooks:
+
+- set `OperationApplyOptions{StartIndex: i}` to continue operation execution from
+  `ops[i]` after a partial failure
+- `StartIndex` must be within `[0, len(ops)]`
 
 Supported operation kinds include create (file/dir/symlink/hardlink), delete,
 rename, chmod/chown, truncate, append, overwrite-range, set-xattr, and remove-xattr.
