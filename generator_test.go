@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -125,6 +126,81 @@ func TestRunReturnsDeterministicCollisionError(t *testing.T) {
 	require.Equal(t, errA.Error(), errB.Error())
 	_, err := os.Stat(base)
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestRunWithMetricsIncludesPlanningAndApplySummary(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(21),
+		WithDirNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(8)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(8)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+	))
+
+	metrics, err := g.RunWithMetrics(RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 2, metrics.Nodes)
+	require.Equal(t, 0, metrics.Retries)
+	require.Equal(t, 0, metrics.Collisions)
+	require.Equal(t, 0, metrics.HardlinkGroups)
+	require.Equal(t, 2, metrics.AppliedEntries)
+	require.Equal(t, 1, metrics.FinalizedDirectories)
+	require.Greater(t, metrics.Elapsed, time.Duration(0))
+	require.Greater(t, metrics.PlanningElapsed, time.Duration(0))
+	require.Greater(t, metrics.ApplyElapsed, time.Duration(0))
+}
+
+func TestRunWithMetricsReturnsPartialMetricsOnPlanLimitError(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "tree")
+
+	g := New(base)
+	require.NoError(t, g.Configure(
+		WithRunMode(RunModeAppend),
+		WithSeed(1),
+		WithPlanEntryLimit(1),
+		WithDirNameGenerator(StringGeneratorAlphabet(FileNameAlphabetBasic)),
+		WithDirNameLengthGenerator(NumberGeneratorConstant(8)),
+		WithDirModeGenerator(FileModeGeneratorConstant(0o750)),
+		WithFilesPerDirectoryGenerator(NumberGeneratorConstant(1)),
+		WithDirectoriesPerDirectoryGenerator(NumberGeneratorConstant(0)),
+		WithFileNameGenerator(func(r *rand.Rand, length int) string {
+			return "fixed"
+		}),
+		WithFileNameLengthGenerator(NumberGeneratorConstant(5)),
+		WithFileModeGenerator(FileModeGeneratorConstant(0o600)),
+		WithDataGenerator(DataGeneratorFixedString("payload")),
+		WithPathDepthGenerator(NumberGeneratorConstant(1)),
+		WithSymlinkProbability(0),
+		WithRelativeSymlinkProbability(0),
+		WithHardlinkProbability(0),
+	))
+
+	metrics, err := g.RunWithMetrics(RunOptions{})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrPlanEntryLimitExceeded)
+	require.Equal(t, 1, metrics.Nodes)
+	require.Equal(t, 0, metrics.AppliedEntries)
+	require.Equal(t, 0, metrics.FinalizedDirectories)
+	require.Greater(t, metrics.PlanningElapsed, time.Duration(0))
+	require.Zero(t, metrics.ApplyElapsed)
+	require.Greater(t, metrics.Elapsed, time.Duration(0))
 }
 
 func TestRunModeAppendRecursesIntoExistingDirectory(t *testing.T) {
