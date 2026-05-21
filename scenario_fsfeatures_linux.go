@@ -390,7 +390,7 @@ func cloneFileReflink(sourcePath, clonePath string) error {
 func mapFilesystemFeatureError(err error) error {
 	switch {
 	case errors.Is(err, unix.EPERM), errors.Is(err, unix.EACCES):
-		return fmt.Errorf("%v; %w", err, ErrFilesystemFeaturePermissionDenied)
+		return ErrFilesystemFeaturePermissionDenied
 	case errors.Is(err, unix.ENOTSUP),
 		errors.Is(err, unix.EOPNOTSUPP),
 		errors.Is(err, unix.ENOTTY),
@@ -398,7 +398,7 @@ func mapFilesystemFeatureError(err error) error {
 		errors.Is(err, unix.ENODEV),
 		errors.Is(err, unix.ENOSYS),
 		errors.Is(err, unix.EXDEV):
-		return fmt.Errorf("%v; %w", err, ErrFilesystemFeatureUnsupported)
+		return ErrFilesystemFeatureUnsupported
 	default:
 		return err
 	}
