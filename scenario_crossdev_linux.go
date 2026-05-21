@@ -172,12 +172,7 @@ func (s *CrossDeviceScenario) Close() error {
 	}
 
 	if len(errs) > 0 {
-		errMsg := errs[0].Error()
-		for i := 1; i < len(errs); i++ {
-			errMsg += "; " + errs[i].Error()
-		}
-
-		return errors.New(errMsg)
+		return joinErrors(errs)
 	}
 
 	return nil

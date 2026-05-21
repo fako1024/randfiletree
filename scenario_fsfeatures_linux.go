@@ -15,6 +15,12 @@ import (
 const (
 	fsImmutableFlag = 0x00000010
 	fsAppendFlag    = 0x00000020
+
+	filesystemFeatureProbePayload = "probe"
+	reflinkProbePayload           = "reflink-probe-payload"
+	immutableFeaturePayload       = "immutable-feature-payload"
+	appendOnlyFeaturePayload      = "append-only-feature-payload"
+	reflinkFeaturePayload         = "reflink-feature-payload"
 )
 
 func probeFilesystemFeatures(basePath string, features []FilesystemFeature) ([]FilesystemFeatureStatus, error) {
@@ -37,14 +43,14 @@ func probeFilesystemFeatures(basePath string, features []FilesystemFeature) ([]F
 	return statuses, nil
 }
 
-func setupFilesystemFeatureScenario(basePath string, features []FilesystemFeature) (*FilesystemFeatureScenario, error) {
+func setupFilesystemFeatureScenario(basePath string, features []FilesystemFeature) (_ *FilesystemFeatureScenario, err error) {
 	statuses, err := probeFilesystemFeatures(basePath, features)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := ensureFilesystemFeatureAvailability(basePath, statuses); err != nil {
-		return nil, err
+	if availabilityErr := ensureFilesystemFeatureAvailability(basePath, statuses); availabilityErr != nil {
+		return nil, availabilityErr
 	}
 
 	scenario := &FilesystemFeatureScenario{
@@ -52,9 +58,8 @@ func setupFilesystemFeatureScenario(basePath string, features []FilesystemFeatur
 		FeatureStatus: append([]FilesystemFeatureStatus(nil), statuses...),
 	}
 
-	cleanup := true
 	defer func() {
-		if !cleanup {
+		if err == nil {
 			return
 		}
 
@@ -64,23 +69,21 @@ func setupFilesystemFeatureScenario(basePath string, features []FilesystemFeatur
 	for _, feature := range features {
 		switch feature {
 		case FilesystemFeatureImmutable:
-			if err := setupImmutableFeature(scenario); err != nil {
+			if err = setupImmutableFeature(scenario); err != nil {
 				return nil, err
 			}
 		case FilesystemFeatureAppendOnly:
-			if err := setupAppendOnlyFeature(scenario); err != nil {
+			if err = setupAppendOnlyFeature(scenario); err != nil {
 				return nil, err
 			}
 		case FilesystemFeatureReflink:
-			if err := setupReflinkFeature(scenario); err != nil {
+			if err = setupReflinkFeature(scenario); err != nil {
 				return nil, err
 			}
 		default:
 			return nil, fmt.Errorf("unsupported filesystem feature %d", feature)
 		}
 	}
-
-	cleanup = false
 
 	return scenario, nil
 }
@@ -154,7 +157,7 @@ func probeFilesystemFlagFeature(basePath string, feature FilesystemFeature, flag
 }
 
 func probeReflinkFeature(basePath string) error {
-	sourcePath, err := writeFilesystemFeatureProbePath(basePath, "reflink-source", []byte("reflink-probe-payload"))
+	sourcePath, err := writeFilesystemFeatureProbePath(basePath, "reflink-source", reflinkProbePayload)
 	if err != nil {
 		return err
 	}
@@ -162,7 +165,7 @@ func probeReflinkFeature(basePath string) error {
 		_ = os.Remove(sourcePath)
 	}()
 
-	clonePath, err := writeFilesystemFeatureProbePath(basePath, "reflink-clone", nil)
+	clonePath, err := writeFilesystemFeatureProbePath(basePath, "reflink-clone", "")
 	if err != nil {
 		return err
 	}
@@ -193,7 +196,7 @@ func probeReflinkFeature(basePath string) error {
 
 func setupImmutableFeature(scenario *FilesystemFeatureScenario) error {
 	path := filepath.Join(scenario.BasePath, "immutable.txt")
-	if err := os.WriteFile(path, []byte("immutable-feature-payload"), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte(immutableFeaturePayload), 0o640); err != nil {
 		return fmt.Errorf("failed to create immutable feature file `%s`: %w", path, err)
 	}
 
@@ -210,7 +213,7 @@ func setupImmutableFeature(scenario *FilesystemFeatureScenario) error {
 
 func setupAppendOnlyFeature(scenario *FilesystemFeatureScenario) error {
 	path := filepath.Join(scenario.BasePath, "append-only.txt")
-	if err := os.WriteFile(path, []byte("append-only-feature-payload"), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte(appendOnlyFeaturePayload), 0o640); err != nil {
 		return fmt.Errorf("failed to create append-only feature file `%s`: %w", path, err)
 	}
 
@@ -229,7 +232,7 @@ func setupReflinkFeature(scenario *FilesystemFeatureScenario) error {
 	sourcePath := filepath.Join(scenario.BasePath, "reflink-source.bin")
 	clonePath := filepath.Join(scenario.BasePath, "reflink-clone.bin")
 
-	if err := os.WriteFile(sourcePath, []byte("reflink-feature-payload"), 0o640); err != nil {
+	if err := os.WriteFile(sourcePath, []byte(reflinkFeaturePayload), 0o640); err != nil {
 		return fmt.Errorf("failed to create reflink source file `%s`: %w", sourcePath, err)
 	}
 
@@ -254,7 +257,7 @@ func createFilesystemFeatureProbeFile(basePath string, feature FilesystemFeature
 	}
 
 	path := file.Name()
-	if _, err := file.Write([]byte("probe")); err != nil {
+	if _, err := file.WriteString(filesystemFeatureProbePayload); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
 		return "", nil, fmt.Errorf("failed to initialize %s probe file `%s`: %w", feature, path, err)
@@ -272,15 +275,15 @@ func createFilesystemFeatureProbeFile(basePath string, feature FilesystemFeature
 	return path, cleanup, nil
 }
 
-func writeFilesystemFeatureProbePath(basePath, namePrefix string, payload []byte) (string, error) {
+func writeFilesystemFeatureProbePath(basePath, namePrefix, payload string) (string, error) {
 	file, err := os.CreateTemp(basePath, ".randfiletree-"+namePrefix+"-")
 	if err != nil {
 		return "", fmt.Errorf("failed to create %s probe file in `%s`: %w", namePrefix, basePath, err)
 	}
 
 	path := file.Name()
-	if len(payload) > 0 {
-		if _, err := file.Write(payload); err != nil {
+	if payload != "" {
+		if _, err := file.WriteString(payload); err != nil {
 			_ = file.Close()
 			_ = os.Remove(path)
 			return "", fmt.Errorf("failed to initialize %s probe file `%s`: %w", namePrefix, path, err)
@@ -330,7 +333,7 @@ func enableFilesystemFlagFeature(path string, feature FilesystemFeature, flag in
 func getPathFilesystemFlags(path string) (int, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
-		return 0, mapFilesystemFeatureError(fmt.Sprintf("open `%s` for flag inspection", path), err)
+		return 0, fmt.Errorf("failed to open `%s` for flag inspection: %w", path, mapFilesystemFeatureError(err))
 	}
 	defer func() {
 		_ = unix.Close(fd)
@@ -338,7 +341,7 @@ func getPathFilesystemFlags(path string) (int, error) {
 
 	flags, err := unix.IoctlGetInt(fd, unix.FS_IOC_GETFLAGS)
 	if err != nil {
-		return 0, mapFilesystemFeatureError(fmt.Sprintf("read filesystem flags for `%s`", path), err)
+		return 0, fmt.Errorf("failed to read filesystem flags for `%s`: %w", path, mapFilesystemFeatureError(err))
 	}
 
 	return flags, nil
@@ -347,14 +350,14 @@ func getPathFilesystemFlags(path string) (int, error) {
 func setPathFilesystemFlags(path string, flags int) error {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
-		return mapFilesystemFeatureError(fmt.Sprintf("open `%s` for flag update", path), err)
+		return fmt.Errorf("failed to open `%s` for flag update: %w", path, mapFilesystemFeatureError(err))
 	}
 	defer func() {
 		_ = unix.Close(fd)
 	}()
 
 	if err := unix.IoctlSetInt(fd, unix.FS_IOC_SETFLAGS, flags); err != nil {
-		return mapFilesystemFeatureError(fmt.Sprintf("update filesystem flags for `%s`", path), err)
+		return fmt.Errorf("failed to update filesystem flags for `%s`: %w", path, mapFilesystemFeatureError(err))
 	}
 
 	return nil
@@ -363,7 +366,7 @@ func setPathFilesystemFlags(path string, flags int) error {
 func cloneFileReflink(sourcePath, clonePath string) error {
 	sourceFile, err := os.OpenFile(sourcePath, os.O_RDONLY, 0)
 	if err != nil {
-		return mapFilesystemFeatureError(fmt.Sprintf("open reflink source `%s`", sourcePath), err)
+		return fmt.Errorf("failed to open reflink source `%s`: %w", sourcePath, mapFilesystemFeatureError(err))
 	}
 	defer func() {
 		_ = sourceFile.Close()
@@ -371,26 +374,23 @@ func cloneFileReflink(sourcePath, clonePath string) error {
 
 	cloneFile, err := os.OpenFile(clonePath, os.O_WRONLY, 0)
 	if err != nil {
-		return mapFilesystemFeatureError(fmt.Sprintf("open reflink clone `%s`", clonePath), err)
+		return fmt.Errorf("failed to open reflink clone `%s`: %w", clonePath, mapFilesystemFeatureError(err))
 	}
 	defer func() {
 		_ = cloneFile.Close()
 	}()
 
 	if err := unix.IoctlFileClone(int(cloneFile.Fd()), int(sourceFile.Fd())); err != nil {
-		return mapFilesystemFeatureError(
-			fmt.Sprintf("create reflink `%s` -> `%s`", sourcePath, clonePath),
-			err,
-		)
+		return fmt.Errorf("failed to create reflink `%s` -> `%s`: %w", sourcePath, clonePath, mapFilesystemFeatureError(err))
 	}
 
 	return nil
 }
 
-func mapFilesystemFeatureError(operation string, err error) error {
+func mapFilesystemFeatureError(err error) error {
 	switch {
 	case errors.Is(err, unix.EPERM), errors.Is(err, unix.EACCES):
-		return fmt.Errorf("failed to %s: %v; %w", operation, err, ErrFilesystemFeaturePermissionDenied)
+		return fmt.Errorf("%v; %w", err, ErrFilesystemFeaturePermissionDenied)
 	case errors.Is(err, unix.ENOTSUP),
 		errors.Is(err, unix.EOPNOTSUPP),
 		errors.Is(err, unix.ENOTTY),
@@ -398,8 +398,8 @@ func mapFilesystemFeatureError(operation string, err error) error {
 		errors.Is(err, unix.ENODEV),
 		errors.Is(err, unix.ENOSYS),
 		errors.Is(err, unix.EXDEV):
-		return fmt.Errorf("failed to %s: %v; %w", operation, err, ErrFilesystemFeatureUnsupported)
+		return fmt.Errorf("%v; %w", err, ErrFilesystemFeatureUnsupported)
 	default:
-		return fmt.Errorf("failed to %s: %w", operation, err)
+		return err
 	}
 }

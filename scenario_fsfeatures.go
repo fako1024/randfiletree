@@ -134,7 +134,7 @@ func (s *FilesystemFeatureScenario) Close() error {
 		return nil
 	}
 
-	return joinFilesystemFeatureErrors(errs)
+	return joinErrors(errs)
 }
 
 func prepareFilesystemFeatureInputs(basePath string, features []FilesystemFeature, allowEmpty bool) (string, []FilesystemFeature, error) {
@@ -241,17 +241,4 @@ func statusFromFilesystemFeatureError(feature FilesystemFeature, err error) File
 	}
 
 	return status
-}
-
-func joinFilesystemFeatureErrors(errs []error) error {
-	if len(errs) == 0 {
-		return nil
-	}
-
-	errMsg := errs[0].Error()
-	for i := 1; i < len(errs); i++ {
-		errMsg += "; " + errs[i].Error()
-	}
-
-	return errors.New(errMsg)
 }
