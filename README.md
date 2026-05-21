@@ -92,6 +92,30 @@ This allows deterministic validation of Linux mount-boundary semantics such as:
 
 `CompareDeviceIDs` defaults to `false` to preserve historical behavior.
 
+## Filesystem-Specific Feature Scenarios (Linux)
+
+The package provides opt-in Linux scenario helpers for filesystem-specific
+behavior:
+
+- immutable flag scenario (`FilesystemFeatureImmutable`)
+- append-only flag scenario (`FilesystemFeatureAppendOnly`)
+- reflink clone scenario (`FilesystemFeatureReflink`)
+
+Use `SetupFilesystemFeatureScenario(basePath, features...)` to build explicit
+fixtures, and `ProbeFilesystemFeatures(basePath, features...)` to run
+capability-aware probes before setup.
+
+Important:
+
+- feature scenarios are Linux-only and return explicit unsupported diagnostics
+  elsewhere
+- setup is explicit opt-in; no filesystem-specific behavior is enabled by
+  default
+- probe/setup failures classify unavailable features deterministically
+  (`permission-denied`, `unsupported`, `unavailable`)
+- scenario cleanup should call `(*FilesystemFeatureScenario).Close()` to
+  restore mutable inode flags
+
 ## Linux Metadata Controls
 
 The generator can now apply Linux metadata controls for created files and
