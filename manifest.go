@@ -238,7 +238,8 @@ func BuildScenarioManifest(g *Generator, ops []Operation) (ScenarioManifest, err
 	return sealed, nil
 }
 
-// BuildScenarioManifest builds a portable replay manifest from generator plan + operation stream.
+// BuildScenarioManifest is a convenience wrapper around the standalone
+// BuildScenarioManifest that binds to the generator receiver.
 func (g *Generator) BuildScenarioManifest(ops []Operation) (ScenarioManifest, error) {
 	return BuildScenarioManifest(g, ops)
 }
@@ -296,7 +297,8 @@ func ApplyScenarioManifest(basePath string, manifest ScenarioManifest) error {
 	return nil
 }
 
-// ApplyScenarioManifest validates and applies a replay manifest to the generator base path.
+// ApplyScenarioManifest is a convenience wrapper around the standalone
+// ApplyScenarioManifest that targets the generator's configured base path.
 func (g *Generator) ApplyScenarioManifest(manifest ScenarioManifest) error {
 	if g == nil {
 		return ErrNilGenerator
