@@ -185,11 +185,17 @@ func (o OperationApplyOptions) validate(operationCount int) error {
 }
 
 // ApplyOperations executes operations in strict order and fails fast.
+//
+// Not safe for concurrent use against the same basePath: operations mutate the
+// shared filesystem subtree and the fault injector backing OperationApplyOptions
+// keeps per-rule trigger state without locking.
 func ApplyOperations(basePath string, ops []Operation) error {
 	return ApplyOperationsWithOptions(basePath, ops, OperationApplyOptions{})
 }
 
 // ApplyOperationsWithOptions executes operations in strict order and fails fast.
+//
+// Carries the same single-goroutine contract as ApplyOperations.
 func ApplyOperationsWithOptions(basePath string, ops []Operation, opts OperationApplyOptions) error {
 	if strings.TrimSpace(basePath) == "" {
 		return ErrBasePathEmpty

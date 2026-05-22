@@ -59,6 +59,11 @@ type FaultRule struct {
 }
 
 // FaultProfile defines deterministic fault injection rules.
+//
+// A FaultProfile is consumed by the per-run faultInjector which keeps
+// per-rule match counters without synchronization; a profile may be reused
+// across non-concurrent Generator/ApplyOperations invocations, but injection
+// itself relies on single-goroutine ownership of the surrounding execution.
 type FaultProfile struct {
 	Rules []FaultRule
 }
