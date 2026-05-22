@@ -2,10 +2,10 @@ package randfiletree
 
 import (
 	"math/rand"
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -44,8 +44,8 @@ func TestBuildScenarioManifestIncludesCapabilities(t *testing.T) {
 	}, {
 		Kind: OperationKindChown,
 		Path: "/file",
-		UID:  os.Getuid(),
-		GID:  os.Getgid(),
+		UID:  1,
+		GID:  1,
 	}})
 	require.NoError(t, err)
 
@@ -83,6 +83,10 @@ func TestApplyScenarioManifestParity(t *testing.T) {
 	require.NoError(t, ApplyOperations(left, ops))
 
 	require.NoError(t, ApplyScenarioManifest(right, manifest))
+
+	fixedTime := time.Unix(1_700_000_100, 0)
+	require.NoError(t, normalizeTreeMTime(left, fixedTime))
+	require.NoError(t, normalizeTreeMTime(right, fixedTime))
 
 	require.NoError(t, diff.PathsWithOptions(left, right, diff.DefaultOptions()))
 }
