@@ -45,6 +45,7 @@ func (g *Generator) Configure(opts ...Option) error {
 // WithSeed sets a new seed (and a new random source, for that matter).
 func WithSeed(seed int64) Option {
 	return func(g *Generator) error {
+		g.seed = seed
 		g.rndSrc = rand.New(rand.NewSource(seed)) // #nosec G404
 		return nil
 	}

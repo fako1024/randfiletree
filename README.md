@@ -218,6 +218,29 @@ Mutation resume/retry hooks:
   `ops[i]` after a partial failure
 - `StartIndex` must be within `[0, len(ops)]`
 
+## Scenario Manifest Import/Export
+
+Portable scenario manifests provide deterministic replay across machines and CI runs.
+
+- build manifest payloads from a configured generator + operation stream with
+  `BuildScenarioManifest(...)` / `(*Generator).BuildScenarioManifest(...)`
+- export/import JSON manifests with `ExportScenarioManifestJSON(...)`,
+  `ParseScenarioManifestJSON(...)`, and `ApplyScenarioManifestJSON(...)`
+- export/import YAML manifests with `ExportScenarioManifestYAML(...)`,
+  `ParseScenarioManifestYAML(...)`, and `ApplyScenarioManifestYAML(...)`
+- apply typed manifests directly with `ApplyScenarioManifest(basePath, manifest)`
+
+Manifest behavior:
+
+- manifest format is versioned (`version`) and fails explicitly for unsupported
+  versions
+- integrity is verified with a deterministic checksum before apply; corruption
+  or payload tampering returns explicit checksum mismatch errors
+- required capability declarations are validated and enforced before replay
+  execution
+- manifests include `deterministicSettings` metadata for future non-random
+  deterministic controls without breaking schema compatibility
+
 Supported operation kinds include create (file/dir/symlink/hardlink), delete,
 rename, chmod/chown, truncate, append, overwrite-range, set-xattr, and remove-xattr.
 
