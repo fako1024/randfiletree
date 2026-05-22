@@ -19,6 +19,8 @@ var (
 	ErrContentPatternConfigurationIncomplete  = errors.New("content pattern configuration requires both pattern and logical size generators")
 	ErrPlanEntryLimitInvalid                  = errors.New("plan entry limit must be > 0")
 	ErrPlanEntryLimitExceeded                 = errors.New("planned entry limit exceeded")
+	ErrScenarioNameEmpty                      = errors.New("scenario name must not be empty")
+	ErrScenarioUnknown                        = errors.New("scenario is not part of built-in catalog")
 
 	ErrSpecialFilePermissionDenied = errors.New("insufficient privileges to create requested special file")
 	ErrSpecialFileUnsupported      = errors.New("special file generation is unsupported on this filesystem or platform")
