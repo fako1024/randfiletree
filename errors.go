@@ -67,6 +67,14 @@ var (
 	ErrFaultInjected                 = errors.New("fault injected")
 	ErrOperationStartIndexNegative   = errors.New("operation start index must be >= 0")
 	ErrOperationStartIndexOutOfRange = errors.New("operation start index exceeds operation count")
+
+	ErrScenarioManifestVersionTooOld                = errors.New("scenario manifest version is no longer supported")
+	ErrScenarioManifestVersionTooNew                = errors.New("scenario manifest version is newer than supported")
+	ErrScenarioManifestPayloadEmpty                 = errors.New("scenario manifest payload must not be empty")
+	ErrScenarioManifestCapabilitiesIncomplete       = errors.New("scenario manifest capabilities are incomplete for declared payload")
+	ErrScenarioManifestChecksumMismatch             = errors.New("scenario manifest checksum mismatch")
+	ErrScenarioManifestChecksumAlgorithmUnsupported = errors.New("scenario manifest checksum algorithm unsupported")
+	ErrScenarioManifestCapabilityUnsupported        = errors.New("scenario manifest capability unsupported")
 )
 
 func joinErrors(errs []error) error {
