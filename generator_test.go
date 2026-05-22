@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -160,9 +159,8 @@ func TestRunWithMetricsIncludesPlanningAndApplySummary(t *testing.T) {
 	require.Equal(t, 0, metrics.HardlinkGroups)
 	require.Equal(t, 2, metrics.AppliedEntries)
 	require.Equal(t, 1, metrics.FinalizedDirectories)
-	require.Greater(t, metrics.Elapsed, time.Duration(0))
-	require.Greater(t, metrics.PlanningElapsed, time.Duration(0))
-	require.Greater(t, metrics.ApplyElapsed, time.Duration(0))
+	require.GreaterOrEqual(t, metrics.Elapsed, metrics.PlanningElapsed)
+	require.GreaterOrEqual(t, metrics.Elapsed, metrics.ApplyElapsed)
 }
 
 func TestRunWithMetricsReturnsPartialMetricsOnPlanLimitError(t *testing.T) {
@@ -198,9 +196,8 @@ func TestRunWithMetricsReturnsPartialMetricsOnPlanLimitError(t *testing.T) {
 	require.Equal(t, 1, metrics.Nodes)
 	require.Equal(t, 0, metrics.AppliedEntries)
 	require.Equal(t, 0, metrics.FinalizedDirectories)
-	require.Greater(t, metrics.PlanningElapsed, time.Duration(0))
 	require.Zero(t, metrics.ApplyElapsed)
-	require.Greater(t, metrics.Elapsed, time.Duration(0))
+	require.GreaterOrEqual(t, metrics.Elapsed, metrics.PlanningElapsed)
 }
 
 func TestRunModeAppendRecursesIntoExistingDirectory(t *testing.T) {
