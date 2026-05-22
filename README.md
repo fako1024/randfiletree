@@ -13,6 +13,90 @@ Planning enforces unique generated paths with bounded retries. If unique path pl
 be completed, `Run()` returns `ErrPlanPathCollisionExhausted` instead of silently under-generating
 the tree.
 
+## Built-in Scenario Catalog
+
+Use the name-based catalog entrypoint to select realistic backup edge-case trees without
+manually wiring every low-level option:
+
+- `BuildBuiltInScenario(name, seed)` returns a deterministic scenario spec
+- `BuiltInScenarioCatalog()` returns all available scenario descriptors (intent,
+  capabilities, prerequisites, pitfalls)
+- scenario names are normalized (`hardlink heavy`, `hardlink_heavy`, and
+  `hardlink-heavy` are equivalent)
+
+Scenario contract:
+
+- input: scenario `name` + deterministic `seed`
+- output: `BuiltInScenarioSpec` with descriptor + fully configured `[]Option`
+- deterministic behavior: same name+seed produces equivalent planning behavior
+- capability handling: unsupported environments return explicit existing errors
+  (for example Linux metadata/xattr/ACL unsupported diagnostics)
+
+### Built-in Scenarios
+
+- `hardlink-heavy`
+  - stresses: inode sharing and hardlink group parity
+  - prerequisites: hardlink creation support
+  - pitfalls: mutating one linked path mutates all links in that inode group
+- `symlink-cycle`
+  - stresses: cycle-aware symlink traversal, chained links, dangling links
+  - prerequisites: symlink creation support
+  - pitfalls: recursive traversal must guard against cycles
+- `metadata-heavy`
+  - stresses: dense mode-bit + timestamp metadata handling
+  - prerequisites: Linux nanosecond timestamp metadata support
+  - pitfalls: non-Linux systems fail with explicit metadata unsupported errors
+- `sparse-large`
+  - stresses: sparse allocation and large logical-size replay semantics
+  - prerequisites: enough free space for configured logical sizes
+  - pitfalls: logical size and allocated blocks are intentionally different
+- `xattr-acl-heavy`
+  - stresses: xattr/ACL metadata parity
+  - prerequisites: Linux filesystem with user xattr and POSIX ACL support
+  - pitfalls: some filesystems/mounts disable ACL/xattr features by default
+
+### E2E Usage Examples
+
+Generic flow:
+
+```go
+basePath := filepath.Join(os.TempDir(), "randfiletree-hardlink")
+
+spec, err := randfiletree.BuildBuiltInScenario(randfiletree.ScenarioNameHardlinkHeavy, 42)
+if err != nil {
+	return err
+}
+
+g, err := randfiletree.NewWithOptions(basePath, spec.Options...)
+if err != nil {
+	return err
+}
+
+if err := g.Run(); err != nil {
+	return err
+}
+```
+
+Select by catalog descriptor:
+
+```go
+for _, descriptor := range randfiletree.BuiltInScenarioCatalog() {
+	spec, err := randfiletree.BuildBuiltInScenario(descriptor.Name, 20260522)
+	if err != nil {
+		return err
+	}
+
+	g, err := randfiletree.NewWithOptions(filepath.Join(basePath, descriptor.Name), spec.Options...)
+	if err != nil {
+		return err
+	}
+
+	if err := g.Run(); err != nil {
+		return err
+	}
+}
+```
+
 ### Performance Harness
 
 Large-scale planning and apply diagnostics are exposed via `RunWithMetrics(opts)`:
