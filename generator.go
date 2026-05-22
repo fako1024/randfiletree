@@ -61,6 +61,8 @@ type Generator struct {
 	byteFileNameGen ByteNameGenerator
 	byteDirNameGen  ByteNameGenerator
 
+	seed int64
+
 	rndSrc  *rand.Rand
 	runMode RunMode
 
@@ -73,6 +75,7 @@ func New(basePath string) *Generator {
 		basePath: basePath,
 
 		/* #nosec G404 */
+		seed:           defaultSeed,
 		rndSrc:         rand.New(rand.NewSource(defaultSeed)),
 		runMode:        RunModeAppend,
 		planEntryLimit: defaultPlanEntryLimit,
