@@ -30,11 +30,37 @@ var (
 )
 
 // OperationApplyError denotes a failed operation execution with replay context.
+//
+// Spec holds the JSON-encoded replay snapshot of the original operation stream
+// for use with ParseOperationSpec / ApplyOperationsWithOptions. It is populated
+// lazily on the first call to ReplaySpec or Error so that a failing run does
+// not pay the full O(N) serialization cost when the caller never inspects it.
 type OperationApplyError struct {
 	Index     int
 	Operation Operation
 	Spec      string
 	Err       error
+
+	specOps []Operation
+}
+
+// ReplaySpec returns the JSON replay snapshot, computing it on first call.
+func (e *OperationApplyError) ReplaySpec() string {
+	if e == nil {
+		return ""
+	}
+	if e.Spec != "" || len(e.specOps) == 0 {
+		return e.Spec
+	}
+
+	spec, specErr := ExportOperationSpec(e.specOps)
+	if specErr != nil {
+		spec = fmt.Sprintf("{\"exportError\":%q}", specErr.Error())
+	}
+	e.Spec = spec
+	e.specOps = nil
+
+	return e.Spec
 }
 
 func (e *OperationApplyError) Error() string {
@@ -42,7 +68,8 @@ func (e *OperationApplyError) Error() string {
 		return "<nil>"
 	}
 
-	if e.Spec == "" {
+	spec := e.ReplaySpec()
+	if spec == "" {
 		return fmt.Sprintf("operation[%d] %s %s failed: %v", e.Index, e.Operation.Kind, operationPathLabel(e.Operation), e.Err)
 	}
 
@@ -52,7 +79,7 @@ func (e *OperationApplyError) Error() string {
 		e.Operation.Kind,
 		operationPathLabel(e.Operation),
 		e.Err,
-		e.Spec,
+		spec,
 	)
 }
 
@@ -1333,16 +1360,14 @@ func pathExists(path string) (bool, error) {
 }
 
 func newOperationApplyError(index int, op Operation, ops []Operation, err error) error {
-	spec, specErr := ExportOperationSpec(ops)
-	if specErr != nil {
-		spec = fmt.Sprintf("{\"exportError\":%q}", specErr.Error())
-	}
-
+	// Capture the source ops without serializing yet. ReplaySpec/Error will
+	// trigger the (potentially large) JSON encoding only when the spec is
+	// actually inspected.
 	return &OperationApplyError{
 		Index:     index,
 		Operation: op,
-		Spec:      spec,
 		Err:       err,
+		specOps:   ops,
 	}
 }
 
