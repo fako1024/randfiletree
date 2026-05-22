@@ -228,6 +228,60 @@ type mutationState struct {
 	nodes map[string]mutationNode
 
 	nameSeq int
+
+	// Lazily-rebuilt sorted indexes over nodes. Invalidated by
+	// invalidatePathIndexes() whenever the node map mutates so each
+	// planOperation attempt can reuse the same scan across all kinds.
+	indexAll     []string
+	indexFiles   []string
+	indexDirs    []string
+	indexXAttrs  []string
+	indexesValid bool
+}
+
+func (state *mutationState) invalidatePathIndexes() {
+	state.indexesValid = false
+	state.indexAll = nil
+	state.indexFiles = nil
+	state.indexDirs = nil
+	state.indexXAttrs = nil
+}
+
+func (state *mutationState) rebuildPathIndexes() {
+	if state.indexesValid {
+		return
+	}
+
+	all := make([]string, 0, len(state.nodes))
+	files := make([]string, 0, len(state.nodes))
+	dirs := make([]string, 0, len(state.nodes))
+	xattrs := make([]string, 0, len(state.nodes))
+
+	for path, node := range state.nodes {
+		all = append(all, path)
+
+		switch node.typeID {
+		case mutationNodeTypeFile:
+			files = append(files, path)
+		case mutationNodeTypeDir:
+			dirs = append(dirs, path)
+		}
+
+		if len(node.xattrs) > 0 {
+			xattrs = append(xattrs, path)
+		}
+	}
+
+	sort.Strings(all)
+	sort.Strings(files)
+	sort.Strings(dirs)
+	sort.Strings(xattrs)
+
+	state.indexAll = all
+	state.indexFiles = files
+	state.indexDirs = dirs
+	state.indexXAttrs = xattrs
+	state.indexesValid = true
 }
 
 func scanMutationState(basePath string) (*mutationState, error) {
@@ -591,67 +645,41 @@ func (state *mutationState) planOperation(kind OperationKind, r *rand.Rand, maxD
 }
 
 func (state *mutationState) sortedPaths(includeRoot bool) []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path := range state.nodes {
-		if path == "/" && !includeRoot {
-			continue
-		}
-
-		paths = append(paths, path)
+	state.rebuildPathIndexes()
+	if includeRoot {
+		return state.indexAll
 	}
 
-	sort.Strings(paths)
+	if len(state.indexAll) > 0 && state.indexAll[0] == "/" {
+		return state.indexAll[1:]
+	}
 
-	return paths
+	return state.indexAll
 }
 
 func (state *mutationState) sortedDirPaths() []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path, node := range state.nodes {
-		if node.typeID != mutationNodeTypeDir {
-			continue
-		}
+	state.rebuildPathIndexes()
 
-		paths = append(paths, path)
-	}
-
-	sort.Strings(paths)
-
-	return paths
+	return state.indexDirs
 }
 
 func (state *mutationState) sortedFilePaths() []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path, node := range state.nodes {
-		if node.typeID != mutationNodeTypeFile {
-			continue
-		}
+	state.rebuildPathIndexes()
 
-		paths = append(paths, path)
-	}
-
-	sort.Strings(paths)
-
-	return paths
+	return state.indexFiles
 }
 
 func (state *mutationState) sortedPathsWithXAttrs(includeRoot bool) []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path, node := range state.nodes {
-		if path == "/" && !includeRoot {
-			continue
-		}
-
-		if len(node.xattrs) == 0 {
-			continue
-		}
-
-		paths = append(paths, path)
+	state.rebuildPathIndexes()
+	if includeRoot {
+		return state.indexXAttrs
 	}
 
-	sort.Strings(paths)
+	if len(state.indexXAttrs) > 0 && state.indexXAttrs[0] == "/" {
+		return state.indexXAttrs[1:]
+	}
 
-	return paths
+	return state.indexXAttrs
 }
 
 func (state *mutationState) sortedNodeXAttrs(path string) []string {
@@ -701,6 +729,11 @@ func (state *mutationState) nextMutationName(r *rand.Rand) string {
 }
 
 func (state *mutationState) applyVirtualOperation(op Operation) error {
+	// Any successful operation may invalidate the path indexes. Even read-only
+	// kinds (chmod/chown) cost effectively nothing to invalidate, so always
+	// drop the cache here and let the next planNextOperation rebuild on demand.
+	state.invalidatePathIndexes()
+
 	switch op.Kind {
 	case OperationKindCreateFile:
 		if _, exists := state.nodes[op.Path]; exists {
