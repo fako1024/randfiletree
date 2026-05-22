@@ -51,6 +51,12 @@ func removePathXAttr(path, name string) error {
 	return nil
 }
 
+// listPathXAttrNames returns the sorted xattr name set for path.
+//
+// The implementation uses the size-probe / fetch pattern, which is not atomic:
+// if a concurrent writer adds xattrs between the two calls the second
+// Llistxattr can return ERANGE. The generator/diff package treats the path as
+// a quiescent snapshot, so this is acceptable and not retried.
 func listPathXAttrNames(path string) ([]string, error) {
 	size, err := unix.Llistxattr(path, nil)
 	if err != nil {
@@ -93,6 +99,11 @@ func listPathXAttrNames(path string) ([]string, error) {
 	return names, nil
 }
 
+// getPathXAttr reads a single xattr value.
+//
+// Like listPathXAttrNames this is a non-atomic size-probe / fetch pair and may
+// observe ERANGE if the value is resized concurrently; we rely on the caller
+// treating the path as a quiescent snapshot.
 func getPathXAttr(path, name string) ([]byte, error) {
 	normalizedName, err := validateXAttrName(name)
 	if err != nil {
