@@ -1123,20 +1123,8 @@ func applyOperation(basePath string, op Operation) error {
 			return fmt.Errorf("append `%s`: %w", op.Path, err)
 		}
 
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
-		if err != nil {
-			return fmt.Errorf("failed to open append target `%s`: %w", op.Path, err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-
-		nWritten, err := f.Write(op.Data)
-		if err != nil {
-			return fmt.Errorf("failed to append to `%s`: %w", op.Path, err)
-		}
-		if nWritten != len(op.Data) {
-			return fmt.Errorf("append to `%s` wrote %d bytes, expected %d", op.Path, nWritten, len(op.Data))
+		if err := appendToOperationFile(path, op.Path, op.Data); err != nil {
+			return err
 		}
 
 	case OperationKindOverwriteRange:
@@ -1153,20 +1141,8 @@ func applyOperation(basePath string, op Operation) error {
 			)
 		}
 
-		f, err := os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil {
-			return fmt.Errorf("failed to open overwrite target `%s`: %w", op.Path, err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-
-		nWritten, err := f.WriteAt(op.Data, op.Offset)
-		if err != nil {
-			return fmt.Errorf("failed to overwrite `%s` at offset %d: %w", op.Path, op.Offset, err)
-		}
-		if nWritten != len(op.Data) {
-			return fmt.Errorf("overwrite-range on `%s` wrote %d bytes, expected %d", op.Path, nWritten, len(op.Data))
+		if err := overwriteOperationFile(path, op.Path, op.Offset, op.Data); err != nil {
+			return err
 		}
 
 	case OperationKindSetXAttr:
@@ -1189,6 +1165,50 @@ func applyOperation(basePath string, op Operation) error {
 
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedOperation, op.Kind)
+	}
+
+	return nil
+}
+
+func appendToOperationFile(fsPath, opPath string, data []byte) (err error) {
+	f, err := os.OpenFile(fsPath, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open append target `%s`: %w", opPath, err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to finalize append to `%s`: %w", opPath, closeErr)
+		}
+	}()
+
+	nWritten, err := f.Write(data)
+	if err != nil {
+		return fmt.Errorf("failed to append to `%s`: %w", opPath, err)
+	}
+	if nWritten != len(data) {
+		return fmt.Errorf("append to `%s` wrote %d bytes, expected %d", opPath, nWritten, len(data))
+	}
+
+	return nil
+}
+
+func overwriteOperationFile(fsPath, opPath string, offset int64, data []byte) (err error) {
+	f, err := os.OpenFile(fsPath, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open overwrite target `%s`: %w", opPath, err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to finalize overwrite of `%s`: %w", opPath, closeErr)
+		}
+	}()
+
+	nWritten, err := f.WriteAt(data, offset)
+	if err != nil {
+		return fmt.Errorf("failed to overwrite `%s` at offset %d: %w", opPath, offset, err)
+	}
+	if nWritten != len(data) {
+		return fmt.Errorf("overwrite-range on `%s` wrote %d bytes, expected %d", opPath, nWritten, len(data))
 	}
 
 	return nil
