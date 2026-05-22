@@ -24,6 +24,12 @@ const (
 	scenarioManifestChecksumAlgorithmSHA256 = "sha256"
 )
 
+// scenarioManifestCanonicalJSON is the encoder used for checksum computation.
+// It is pinned to encoding/json compatibility mode so that future jsoniter
+// upgrades cannot silently change the canonical byte sequence and invalidate
+// checksums embedded in existing manifests on disk.
+var scenarioManifestCanonicalJSON = jsoniter.ConfigCompatibleWithStandardLibrary
+
 // ScenarioManifest denotes a portable, versioned replay specification.
 type ScenarioManifest struct {
 	Version int `json:"version" yaml:"version"`
@@ -883,7 +889,7 @@ func verifyScenarioManifestIntegrity(manifest ScenarioManifest) error {
 func scenarioManifestChecksum(manifest ScenarioManifest) (string, error) {
 	manifest.Integrity = ScenarioManifestIntegrity{}
 
-	payload, err := jsoniter.Marshal(manifest)
+	payload, err := scenarioManifestCanonicalJSON.Marshal(manifest)
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize scenario manifest checksum payload: %w", err)
 	}

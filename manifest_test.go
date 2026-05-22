@@ -254,6 +254,32 @@ func TestBuildScenarioManifestNilGenerator(t *testing.T) {
 	require.ErrorIs(t, err, ErrNilGenerator)
 }
 
+// TestScenarioManifestChecksumGolden pins the canonical JSON checksum of a
+// minimal manifest. Any change to the encoder configuration, field layout, or
+// integrity algorithm that alters this checksum must be treated as a payload
+// format change and a manifest version bump, since checksums already embedded
+// in manifests on disk would no longer verify.
+func TestScenarioManifestChecksumGolden(t *testing.T) {
+	t.Parallel()
+
+	manifest := ScenarioManifest{
+		Version: 1,
+		Generator: ScenarioManifestGenerator{
+			Seed:           42,
+			RunMode:        RunModeAppend,
+			PlanEntryLimit: 1024,
+		},
+		Entries: []ScenarioManifestEntry{
+			{Type: ScenarioManifestEntryTypeDir, Path: "/", Mode: 0o755},
+			{Type: ScenarioManifestEntryTypeFile, Path: "/a.txt", Mode: 0o644, Data: []byte("alpha")},
+		},
+	}
+
+	checksum, err := scenarioManifestChecksum(manifest)
+	require.NoError(t, err)
+	require.Equal(t, "e55fae3a2a3ac4a15805eb60e4c1f7c16eecc172454fb500cfcbd617f42478cc", checksum)
+}
+
 func newManifestConfiguredGenerator(t *testing.T, basePath string) *Generator {
 	t.Helper()
 
