@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 const (
@@ -49,6 +50,12 @@ type plannedEntry struct {
 type runPlan struct {
 	entries        []plannedEntry
 	hardlinkGroups []plannedHardlinkGroup
+	metrics        planMetrics
+}
+
+type planMetrics struct {
+	pathRetries    int
+	pathCollisions int
 }
 
 type plannedHardlinkGroup struct {
@@ -67,6 +74,19 @@ type planState struct {
 
 	hardlinkGroups      []*plannedHardlinkGroup
 	hardlinkGroupByPath map[string]*plannedHardlinkGroup
+
+	entryLimit int
+	metrics    planMetrics
+}
+
+func (state *planState) appendEntry(plan *runPlan, entry plannedEntry) error {
+	if len(plan.entries) >= state.entryLimit {
+		return fmt.Errorf("%w: limit=%d", ErrPlanEntryLimitExceeded, state.entryLimit)
+	}
+
+	plan.entries = append(plan.entries, entry)
+
+	return nil
 }
 
 func (g *Generator) planRun() (runPlan, error) {
@@ -76,14 +96,19 @@ func (g *Generator) planRun() (runPlan, error) {
 			g.basePath: {},
 		},
 		hardlinkGroupByPath: make(map[string]*plannedHardlinkGroup),
+		entryLimit:          g.planEntryLimit,
 	}
 
 	plan := runPlan{entries: make([]plannedEntry, 0, 16)}
 	if err := g.planDir(g.basePath, 0, &state, &plan); err != nil {
-		return runPlan{}, err
+		plan.hardlinkGroups = state.materializeHardlinkGroups()
+		plan.metrics = state.metrics
+
+		return plan, err
 	}
 
 	plan.hardlinkGroups = state.materializeHardlinkGroups()
+	plan.metrics = state.metrics
 
 	return plan, nil
 }
@@ -94,12 +119,14 @@ func (g *Generator) planDir(path string, depth int, state *planState, plan *runP
 		return nil
 	}
 
-	plan.entries = append(plan.entries, plannedEntry{
+	if err := state.appendEntry(plan, plannedEntry{
 		typeID:   plannedEntryTypeDir,
 		path:     path,
 		mode:     g.dirModeGen(state.rnd),
 		metadata: metadataConfig{},
-	})
+	}); err != nil {
+		return err
+	}
 	entryIndex := len(plan.entries) - 1
 
 	metadata, err := g.resolveMetadata(state.rnd)
@@ -234,7 +261,9 @@ func (g *Generator) planSymlinkStrategy(
 			return false, err
 		}
 
-		g.appendSymlink(plan, state, symlinkPath, filepath.Base(symlinkPath))
+		if err := g.appendSymlink(plan, state, symlinkPath, filepath.Base(symlinkPath)); err != nil {
+			return false, err
+		}
 
 		return true, nil
 
@@ -286,7 +315,9 @@ func (g *Generator) planSymlinkCycle(dir string, length int, state *planState, p
 			return fmt.Errorf("failed to derive cycle symlink target for `%s`: %w", path, err)
 		}
 
-		g.appendSymlink(plan, state, path, relTarget)
+		if err := g.appendSymlink(plan, state, path, relTarget); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -307,11 +338,13 @@ func (g *Generator) tryPlanHardlink(dir string, state *planState, plan *runPlan)
 		return false, err
 	}
 
-	plan.entries = append(plan.entries, plannedEntry{
+	if err := state.appendEntry(plan, plannedEntry{
 		typeID:     plannedEntryTypeHardlink,
 		path:       hardlinkPath,
 		linkTarget: targetPath,
-	})
+	}); err != nil {
+		return false, err
+	}
 
 	state.registerFilePath(hardlinkPath)
 	state.lastPath = hardlinkPath
@@ -358,7 +391,9 @@ func (g *Generator) tryPlanSpecialFile(dir string, state *planState, plan *runPl
 		}
 	}
 
-	plan.entries = append(plan.entries, entry)
+	if err := state.appendEntry(plan, entry); err != nil {
+		return false, err
+	}
 	state.lastPath = path
 
 	return true, nil
@@ -398,7 +433,9 @@ func (g *Generator) planFile(dir string, state *planState, plan *runPlan) error 
 	}
 	entry.metadata = metadata
 
-	plan.entries = append(plan.entries, entry)
+	if err := state.appendEntry(plan, entry); err != nil {
+		return err
+	}
 	state.registerFilePath(filePath)
 	state.lastPath = filePath
 
@@ -427,18 +464,24 @@ func (g *Generator) planSymlink(dir, target string, state *planState, plan *runP
 		return err
 	}
 
-	g.appendSymlink(plan, state, symlinkPath, target)
+	if err := g.appendSymlink(plan, state, symlinkPath, target); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (g *Generator) appendSymlink(plan *runPlan, state *planState, path, target string) {
-	plan.entries = append(plan.entries, plannedEntry{
+func (g *Generator) appendSymlink(plan *runPlan, state *planState, path, target string) error {
+	if err := state.appendEntry(plan, plannedEntry{
 		typeID:     plannedEntryTypeSymlink,
 		path:       path,
 		linkTarget: target,
-	})
+	}); err != nil {
+		return err
+	}
 	state.registerSymlinkPath(path)
+
+	return nil
 }
 
 func (g *Generator) planUniquePathWithByte(
@@ -458,6 +501,8 @@ func (g *Generator) planUniquePathWithByte(
 		}
 		path := filepath.Join(dir, name)
 		if _, exists := state.used[path]; exists {
+			state.metrics.pathRetries++
+			state.metrics.pathCollisions++
 			continue
 		}
 
@@ -537,7 +582,21 @@ func (state *planState) materializeHardlinkGroups() []plannedHardlinkGroup {
 	return groups
 }
 
-func (g *Generator) applyRunPlan(plan runPlan, execCtx executionContext) error {
+type applyStats struct {
+	appliedEntries       int
+	finalizedDirectories int
+	elapsed              time.Duration
+}
+
+func (g *Generator) applyRunPlan(plan runPlan, execCtx executionContext) (applyStats, error) {
+	start := time.Now()
+	stats := applyStats{}
+	finish := func(err error) (applyStats, error) {
+		stats.elapsed = time.Since(start)
+
+		return stats, err
+	}
+
 	switch g.runMode {
 	case RunModeAppend:
 		// no pre-step required
@@ -545,23 +604,24 @@ func (g *Generator) applyRunPlan(plan runPlan, execCtx executionContext) error {
 		// no pre-step required
 	case RunModeReplace:
 		if err := os.RemoveAll(g.basePath); err != nil {
-			return fmt.Errorf("failed to clear base path `%s`: %w", g.basePath, err)
+			return finish(fmt.Errorf("failed to clear base path `%s`: %w", g.basePath, err))
 		}
 	default:
-		return validateRunMode(g.runMode)
+		return finish(validateRunMode(g.runMode))
 	}
 
 	createdDirs := make(map[string]plannedEntry)
 
 	for i, entry := range plan.entries {
 		if err := execCtx.before(FaultScopeRun, i, plannedEntryTypeLabel(entry.typeID), entry.path); err != nil {
-			return err
+			return finish(err)
 		}
 
 		created, err := g.applyPlannedEntry(entry)
 		if err != nil {
-			return err
+			return finish(err)
 		}
+		stats.appliedEntries++
 
 		if created && entry.typeID == plannedEntryTypeDir {
 			createdDirs[entry.path] = entry
@@ -578,15 +638,16 @@ func (g *Generator) applyRunPlan(plan runPlan, execCtx executionContext) error {
 		}
 
 		if err := execCtx.before(FaultScopeRun, len(plan.entries)+i, "finalize-directory-metadata", entry.path); err != nil {
-			return err
+			return finish(err)
 		}
 
 		if err := applyMetadata(entry.path, entry.mode, entry.metadata); err != nil {
-			return fmt.Errorf("failed to finalize metadata for planned directory `%s`: %w", entry.path, err)
+			return finish(fmt.Errorf("failed to finalize metadata for planned directory `%s`: %w", entry.path, err))
 		}
+		stats.finalizedDirectories++
 	}
 
-	return nil
+	return finish(nil)
 }
 
 func plannedEntryTypeLabel(typeID plannedEntryType) string {
