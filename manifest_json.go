@@ -60,7 +60,8 @@ func ApplyScenarioManifestJSON(basePath, payload string) error {
 	return ApplyScenarioManifest(basePath, manifest)
 }
 
-// ApplyScenarioManifestJSON parses and applies a replay manifest from JSON to the generator base path.
+// ApplyScenarioManifestJSON is a convenience wrapper around the standalone
+// ApplyScenarioManifestJSON that targets the generator's configured base path.
 func (g *Generator) ApplyScenarioManifestJSON(payload string) error {
 	if g == nil {
 		return ErrNilGenerator
