@@ -1,6 +1,6 @@
 module github.com/fako1024/randfiletree
 
-go 1.17
+go 1.21
 
 require (
 	github.com/google/go-cmp v0.5.9
