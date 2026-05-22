@@ -88,6 +88,10 @@ func collectXAttrs(path string) ([]XAttr, error) {
 	return xattrs, nil
 }
 
+// listXAttrNames returns the sorted xattr name set for path. The size-probe
+// then fetch sequence is non-atomic; comparison callers treat the tree as a
+// quiescent snapshot so a concurrent xattr resize that races into ERANGE is
+// surfaced as a generic listing error rather than transparently retried.
 func listXAttrNames(path string) ([]string, error) {
 	size, err := unix.Llistxattr(path, nil)
 	if err != nil {
