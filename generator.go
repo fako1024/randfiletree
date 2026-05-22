@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
-	defaultSeed = 1
+	defaultSeed           = 1
+	defaultPlanEntryLimit = 100000
 )
 
 // Generator denotes a filetree generator
@@ -61,6 +63,8 @@ type Generator struct {
 
 	rndSrc  *rand.Rand
 	runMode RunMode
+
+	planEntryLimit int
 }
 
 // New instantiates a new generator
@@ -69,8 +73,9 @@ func New(basePath string) *Generator {
 		basePath: basePath,
 
 		/* #nosec G404 */
-		rndSrc:  rand.New(rand.NewSource(defaultSeed)),
-		runMode: RunModeAppend,
+		rndSrc:         rand.New(rand.NewSource(defaultSeed)),
+		runMode:        RunModeAppend,
+		planEntryLimit: defaultPlanEntryLimit,
 	}
 }
 
@@ -95,37 +100,78 @@ func (o RunOptions) validate() error {
 
 // RunWithOptions generates a new tree according to the defined rules and execution options.
 func (g *Generator) RunWithOptions(opts RunOptions) error {
+	_, err := g.RunWithMetrics(opts)
+
+	return err
+}
+
+// RunMetrics denotes deterministic planning/apply summary metrics for one generator run.
+type RunMetrics struct {
+	Nodes      int
+	Retries    int
+	Collisions int
+
+	HardlinkGroups       int
+	AppliedEntries       int
+	FinalizedDirectories int
+
+	PlanningElapsed time.Duration
+	ApplyElapsed    time.Duration
+	Elapsed         time.Duration
+}
+
+// RunWithMetrics generates a new tree and returns execution metrics for diagnostics.
+func (g *Generator) RunWithMetrics(opts RunOptions) (RunMetrics, error) {
 	if g == nil {
-		return ErrNilGenerator
+		return RunMetrics{}, ErrNilGenerator
 	}
 
 	if err := opts.validate(); err != nil {
-		return err
+		return RunMetrics{}, err
 	}
 
+	runStart := time.Now()
+
 	if g.hasNoConfiguration() {
-		return nil
+		return RunMetrics{Elapsed: time.Since(runStart)}, nil
 	}
 
 	if err := g.validateRunConfiguration(); err != nil {
-		return err
+		return RunMetrics{Elapsed: time.Since(runStart)}, err
 	}
 
+	planStart := time.Now()
 	plan, err := g.planRun()
+	metrics := RunMetrics{
+		Nodes:          len(plan.entries),
+		Retries:        plan.metrics.pathRetries,
+		Collisions:     plan.metrics.pathCollisions,
+		HardlinkGroups: len(plan.hardlinkGroups),
+	}
+	metrics.PlanningElapsed = time.Since(planStart)
 	if err != nil {
-		return err
+		metrics.Elapsed = time.Since(runStart)
+
+		return metrics, err
 	}
 
 	execCtx, err := newExecutionContext(opts.FaultProfile)
 	if err != nil {
-		return err
+		metrics.Elapsed = time.Since(runStart)
+
+		return metrics, err
 	}
 
-	if err := g.applyRunPlan(plan, execCtx); err != nil {
-		return err
+	applyStats, err := g.applyRunPlan(plan, execCtx)
+	metrics.ApplyElapsed = applyStats.elapsed
+	metrics.AppliedEntries = applyStats.appliedEntries
+	metrics.FinalizedDirectories = applyStats.finalizedDirectories
+	metrics.Elapsed = time.Since(runStart)
+	if err != nil {
+		return metrics, err
 	}
 
-	return nil
+	return metrics, nil
 }
 
 // GenerateOperations creates a deterministic operation stream against the generator base path.
@@ -244,6 +290,9 @@ func (g *Generator) validateRunConfiguration() error {
 	}
 	if err := validateRunMode(g.runMode); err != nil {
 		missing = append(missing, err.Error())
+	}
+	if g.planEntryLimit <= 0 {
+		missing = append(missing, ErrPlanEntryLimitInvalid.Error())
 	}
 
 	if len(missing) > 0 {
