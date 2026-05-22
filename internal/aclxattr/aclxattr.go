@@ -48,6 +48,10 @@ func AccessEntriesFromMode(mode uint32) []Entry {
 }
 
 // Marshal serializes ACL entries to Linux xattr binary format.
+//
+// The kernel exposes posix_acl_xattr_* records in host-native byte order,
+// so the encoding uses binary.NativeEndian to round-trip correctly on
+// both little- and big-endian Linux architectures.
 func Marshal(entries []Entry) ([]byte, error) {
 	if len(entries) == 0 {
 		return nil, nil
@@ -59,13 +63,13 @@ func Marshal(entries []Entry) ([]byte, error) {
 	}
 
 	data := make([]byte, 4+(8*len(sorted)))
-	binary.LittleEndian.PutUint32(data[:4], xattrVersion)
+	binary.NativeEndian.PutUint32(data[:4], xattrVersion)
 
 	offset := 4
 	for _, entry := range sorted {
-		binary.LittleEndian.PutUint16(data[offset:offset+2], entry.Tag)
-		binary.LittleEndian.PutUint16(data[offset+2:offset+4], entry.Perm)
-		binary.LittleEndian.PutUint32(data[offset+4:offset+8], entry.ID)
+		binary.NativeEndian.PutUint16(data[offset:offset+2], entry.Tag)
+		binary.NativeEndian.PutUint16(data[offset+2:offset+4], entry.Perm)
+		binary.NativeEndian.PutUint32(data[offset+4:offset+8], entry.ID)
 		offset += 8
 	}
 
@@ -86,7 +90,7 @@ func Parse(data []byte) ([]Entry, error) {
 		return nil, fmt.Errorf("ACL xattr payload malformed length: %d", len(data))
 	}
 
-	version := binary.LittleEndian.Uint32(data[:4])
+	version := binary.NativeEndian.Uint32(data[:4])
 	if version != xattrVersion {
 		return nil, fmt.Errorf("ACL xattr version mismatch: got %#x want %#x", version, xattrVersion)
 	}
@@ -96,9 +100,9 @@ func Parse(data []byte) ([]Entry, error) {
 	offset := 4
 	for i := 0; i < nEntries; i++ {
 		entries = append(entries, Entry{
-			Tag:  binary.LittleEndian.Uint16(data[offset : offset+2]),
-			Perm: binary.LittleEndian.Uint16(data[offset+2 : offset+4]),
-			ID:   binary.LittleEndian.Uint32(data[offset+4 : offset+8]),
+			Tag:  binary.NativeEndian.Uint16(data[offset : offset+2]),
+			Perm: binary.NativeEndian.Uint16(data[offset+2 : offset+4]),
+			ID:   binary.NativeEndian.Uint32(data[offset+4 : offset+8]),
 		})
 		offset += 8
 	}
