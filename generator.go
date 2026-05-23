@@ -14,7 +14,11 @@ const (
 	defaultPlanEntryLimit = 100000
 )
 
-// Generator denotes a filetree generator
+// Generator denotes a filetree generator.
+//
+// A Generator is not safe for concurrent use. The embedded random source
+// (rndSrc) and the plan/apply state mutate in place; callers that want to
+// run multiple generators in parallel must instantiate one per goroutine.
 type Generator struct {
 	basePath string
 

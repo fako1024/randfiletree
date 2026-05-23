@@ -24,6 +24,12 @@ const (
 	scenarioManifestChecksumAlgorithmSHA256 = "sha256"
 )
 
+// scenarioManifestCanonicalJSON is the encoder used for checksum computation.
+// It is pinned to encoding/json compatibility mode so that future jsoniter
+// upgrades cannot silently change the canonical byte sequence and invalidate
+// checksums embedded in existing manifests on disk.
+var scenarioManifestCanonicalJSON = jsoniter.ConfigCompatibleWithStandardLibrary
+
 // ScenarioManifest denotes a portable, versioned replay specification.
 type ScenarioManifest struct {
 	Version int `json:"version" yaml:"version"`
@@ -232,7 +238,8 @@ func BuildScenarioManifest(g *Generator, ops []Operation) (ScenarioManifest, err
 	return sealed, nil
 }
 
-// BuildScenarioManifest builds a portable replay manifest from generator plan + operation stream.
+// BuildScenarioManifest is a convenience wrapper around the standalone
+// BuildScenarioManifest that binds to the generator receiver.
 func (g *Generator) BuildScenarioManifest(ops []Operation) (ScenarioManifest, error) {
 	return BuildScenarioManifest(g, ops)
 }
@@ -290,7 +297,8 @@ func ApplyScenarioManifest(basePath string, manifest ScenarioManifest) error {
 	return nil
 }
 
-// ApplyScenarioManifest validates and applies a replay manifest to the generator base path.
+// ApplyScenarioManifest is a convenience wrapper around the standalone
+// ApplyScenarioManifest that targets the generator's configured base path.
 func (g *Generator) ApplyScenarioManifest(manifest ScenarioManifest) error {
 	if g == nil {
 		return ErrNilGenerator
@@ -883,7 +891,7 @@ func verifyScenarioManifestIntegrity(manifest ScenarioManifest) error {
 func scenarioManifestChecksum(manifest ScenarioManifest) (string, error) {
 	manifest.Integrity = ScenarioManifestIntegrity{}
 
-	payload, err := jsoniter.Marshal(manifest)
+	payload, err := scenarioManifestCanonicalJSON.Marshal(manifest)
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize scenario manifest checksum payload: %w", err)
 	}

@@ -169,6 +169,14 @@ func xattrNamespace(name string) string {
 	return name[:idx]
 }
 
+// normalizeACLEntries trims, validates and deduplicates raw textual ACL entries.
+//
+// The result is sorted lexicographically. This is safe because the downstream
+// consumer (metadata_linux.go:resolveACLEntries) re-classifies every entry by
+// its "default:" prefix and merges into separate access/default maps before
+// the kernel is touched, so any semantic ordering that POSIX requires (default
+// entries follow access entries; mask placement) is re-established by the
+// aclxattr.SortEntries pass that runs against the binary form.
 func normalizeACLEntries(entries []string) ([]string, error) {
 	if len(entries) == 0 {
 		return nil, nil

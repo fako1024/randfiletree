@@ -30,11 +30,42 @@ var (
 )
 
 // OperationApplyError denotes a failed operation execution with replay context.
+//
+// Spec holds the JSON-encoded replay snapshot of the original operation stream
+// for use with ParseOperationSpec / ApplyOperationsWithOptions. It is populated
+// lazily on the first call to ReplaySpec or Error so that a failing run does
+// not pay the full O(N) serialization cost when the caller never inspects it.
 type OperationApplyError struct {
 	Index     int
 	Operation Operation
 	Spec      string
 	Err       error
+
+	specOps []Operation
+}
+
+// ReplaySpec returns the JSON replay snapshot, computing it on first call.
+func (e *OperationApplyError) ReplaySpec() string {
+	if e == nil {
+		return ""
+	}
+	if e.Spec != "" || len(e.specOps) == 0 {
+		return e.Spec
+	}
+
+	spec, specErr := ExportOperationSpec(e.specOps)
+	if specErr != nil {
+		fallback, marshalErr := jsoniter.Marshal(map[string]string{"exportError": specErr.Error()})
+		if marshalErr != nil {
+			spec = `{"exportError":"<unencodable>"}`
+		} else {
+			spec = string(fallback)
+		}
+	}
+	e.Spec = spec
+	e.specOps = nil
+
+	return e.Spec
 }
 
 func (e *OperationApplyError) Error() string {
@@ -42,7 +73,8 @@ func (e *OperationApplyError) Error() string {
 		return "<nil>"
 	}
 
-	if e.Spec == "" {
+	spec := e.ReplaySpec()
+	if spec == "" {
 		return fmt.Sprintf("operation[%d] %s %s failed: %v", e.Index, e.Operation.Kind, operationPathLabel(e.Operation), e.Err)
 	}
 
@@ -52,7 +84,7 @@ func (e *OperationApplyError) Error() string {
 		e.Operation.Kind,
 		operationPathLabel(e.Operation),
 		e.Err,
-		e.Spec,
+		spec,
 	)
 }
 
@@ -158,11 +190,17 @@ func (o OperationApplyOptions) validate(operationCount int) error {
 }
 
 // ApplyOperations executes operations in strict order and fails fast.
+//
+// Not safe for concurrent use against the same basePath: operations mutate the
+// shared filesystem subtree and the fault injector backing OperationApplyOptions
+// keeps per-rule trigger state without locking.
 func ApplyOperations(basePath string, ops []Operation) error {
 	return ApplyOperationsWithOptions(basePath, ops, OperationApplyOptions{})
 }
 
 // ApplyOperationsWithOptions executes operations in strict order and fails fast.
+//
+// Carries the same single-goroutine contract as ApplyOperations.
 func ApplyOperationsWithOptions(basePath string, ops []Operation, opts OperationApplyOptions) error {
 	if strings.TrimSpace(basePath) == "" {
 		return ErrBasePathEmpty
@@ -228,6 +266,60 @@ type mutationState struct {
 	nodes map[string]mutationNode
 
 	nameSeq int
+
+	// Lazily-rebuilt sorted indexes over nodes. Invalidated by
+	// invalidatePathIndexes() whenever the node map mutates so each
+	// planOperation attempt can reuse the same scan across all kinds.
+	indexAll     []string
+	indexFiles   []string
+	indexDirs    []string
+	indexXAttrs  []string
+	indexesValid bool
+}
+
+func (state *mutationState) invalidatePathIndexes() {
+	state.indexesValid = false
+	state.indexAll = nil
+	state.indexFiles = nil
+	state.indexDirs = nil
+	state.indexXAttrs = nil
+}
+
+func (state *mutationState) rebuildPathIndexes() {
+	if state.indexesValid {
+		return
+	}
+
+	all := make([]string, 0, len(state.nodes))
+	files := make([]string, 0, len(state.nodes))
+	dirs := make([]string, 0, len(state.nodes))
+	xattrs := make([]string, 0, len(state.nodes))
+
+	for path, node := range state.nodes {
+		all = append(all, path)
+
+		switch node.typeID {
+		case mutationNodeTypeFile:
+			files = append(files, path)
+		case mutationNodeTypeDir:
+			dirs = append(dirs, path)
+		}
+
+		if len(node.xattrs) > 0 {
+			xattrs = append(xattrs, path)
+		}
+	}
+
+	sort.Strings(all)
+	sort.Strings(files)
+	sort.Strings(dirs)
+	sort.Strings(xattrs)
+
+	state.indexAll = all
+	state.indexFiles = files
+	state.indexDirs = dirs
+	state.indexXAttrs = xattrs
+	state.indexesValid = true
 }
 
 func scanMutationState(basePath string) (*mutationState, error) {
@@ -591,67 +683,41 @@ func (state *mutationState) planOperation(kind OperationKind, r *rand.Rand, maxD
 }
 
 func (state *mutationState) sortedPaths(includeRoot bool) []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path := range state.nodes {
-		if path == "/" && !includeRoot {
-			continue
-		}
-
-		paths = append(paths, path)
+	state.rebuildPathIndexes()
+	if includeRoot {
+		return state.indexAll
 	}
 
-	sort.Strings(paths)
+	if len(state.indexAll) > 0 && state.indexAll[0] == "/" {
+		return state.indexAll[1:]
+	}
 
-	return paths
+	return state.indexAll
 }
 
 func (state *mutationState) sortedDirPaths() []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path, node := range state.nodes {
-		if node.typeID != mutationNodeTypeDir {
-			continue
-		}
+	state.rebuildPathIndexes()
 
-		paths = append(paths, path)
-	}
-
-	sort.Strings(paths)
-
-	return paths
+	return state.indexDirs
 }
 
 func (state *mutationState) sortedFilePaths() []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path, node := range state.nodes {
-		if node.typeID != mutationNodeTypeFile {
-			continue
-		}
+	state.rebuildPathIndexes()
 
-		paths = append(paths, path)
-	}
-
-	sort.Strings(paths)
-
-	return paths
+	return state.indexFiles
 }
 
 func (state *mutationState) sortedPathsWithXAttrs(includeRoot bool) []string {
-	paths := make([]string, 0, len(state.nodes))
-	for path, node := range state.nodes {
-		if path == "/" && !includeRoot {
-			continue
-		}
-
-		if len(node.xattrs) == 0 {
-			continue
-		}
-
-		paths = append(paths, path)
+	state.rebuildPathIndexes()
+	if includeRoot {
+		return state.indexXAttrs
 	}
 
-	sort.Strings(paths)
+	if len(state.indexXAttrs) > 0 && state.indexXAttrs[0] == "/" {
+		return state.indexXAttrs[1:]
+	}
 
-	return paths
+	return state.indexXAttrs
 }
 
 func (state *mutationState) sortedNodeXAttrs(path string) []string {
@@ -701,6 +767,11 @@ func (state *mutationState) nextMutationName(r *rand.Rand) string {
 }
 
 func (state *mutationState) applyVirtualOperation(op Operation) error {
+	// Any successful operation may invalidate the path indexes. Even read-only
+	// kinds (chmod/chown) cost effectively nothing to invalidate, so always
+	// drop the cache here and let the next planNextOperation rebuild on demand.
+	state.invalidatePathIndexes()
+
 	switch op.Kind {
 	case OperationKindCreateFile:
 		if _, exists := state.nodes[op.Path]; exists {
@@ -1090,20 +1161,8 @@ func applyOperation(basePath string, op Operation) error {
 			return fmt.Errorf("append `%s`: %w", op.Path, err)
 		}
 
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
-		if err != nil {
-			return fmt.Errorf("failed to open append target `%s`: %w", op.Path, err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-
-		nWritten, err := f.Write(op.Data)
-		if err != nil {
-			return fmt.Errorf("failed to append to `%s`: %w", op.Path, err)
-		}
-		if nWritten != len(op.Data) {
-			return fmt.Errorf("append to `%s` wrote %d bytes, expected %d", op.Path, nWritten, len(op.Data))
+		if err := appendToOperationFile(path, op.Path, op.Data); err != nil {
+			return err
 		}
 
 	case OperationKindOverwriteRange:
@@ -1120,20 +1179,8 @@ func applyOperation(basePath string, op Operation) error {
 			)
 		}
 
-		f, err := os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil {
-			return fmt.Errorf("failed to open overwrite target `%s`: %w", op.Path, err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-
-		nWritten, err := f.WriteAt(op.Data, op.Offset)
-		if err != nil {
-			return fmt.Errorf("failed to overwrite `%s` at offset %d: %w", op.Path, op.Offset, err)
-		}
-		if nWritten != len(op.Data) {
-			return fmt.Errorf("overwrite-range on `%s` wrote %d bytes, expected %d", op.Path, nWritten, len(op.Data))
+		if err := overwriteOperationFile(path, op.Path, op.Offset, op.Data); err != nil {
+			return err
 		}
 
 	case OperationKindSetXAttr:
@@ -1156,6 +1203,50 @@ func applyOperation(basePath string, op Operation) error {
 
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedOperation, op.Kind)
+	}
+
+	return nil
+}
+
+func appendToOperationFile(fsPath, opPath string, data []byte) (err error) {
+	f, err := os.OpenFile(fsPath, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open append target `%s`: %w", opPath, err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to finalize append to `%s`: %w", opPath, closeErr)
+		}
+	}()
+
+	nWritten, err := f.Write(data)
+	if err != nil {
+		return fmt.Errorf("failed to append to `%s`: %w", opPath, err)
+	}
+	if nWritten != len(data) {
+		return fmt.Errorf("append to `%s` wrote %d bytes, expected %d", opPath, nWritten, len(data))
+	}
+
+	return nil
+}
+
+func overwriteOperationFile(fsPath, opPath string, offset int64, data []byte) (err error) {
+	f, err := os.OpenFile(fsPath, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open overwrite target `%s`: %w", opPath, err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to finalize overwrite of `%s`: %w", opPath, closeErr)
+		}
+	}()
+
+	nWritten, err := f.WriteAt(data, offset)
+	if err != nil {
+		return fmt.Errorf("failed to overwrite `%s` at offset %d: %w", opPath, offset, err)
+	}
+	if nWritten != len(data) {
+		return fmt.Errorf("overwrite-range on `%s` wrote %d bytes, expected %d", opPath, nWritten, len(data))
 	}
 
 	return nil
@@ -1280,16 +1371,14 @@ func pathExists(path string) (bool, error) {
 }
 
 func newOperationApplyError(index int, op Operation, ops []Operation, err error) error {
-	spec, specErr := ExportOperationSpec(ops)
-	if specErr != nil {
-		spec = fmt.Sprintf("{\"exportError\":%q}", specErr.Error())
-	}
-
+	// Capture the source ops without serializing yet. ReplaySpec/Error will
+	// trigger the (potentially large) JSON encoding only when the spec is
+	// actually inspected.
 	return &OperationApplyError{
 		Index:     index,
 		Operation: op,
-		Spec:      spec,
 		Err:       err,
+		specOps:   ops,
 	}
 }
 

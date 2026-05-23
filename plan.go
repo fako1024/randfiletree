@@ -715,10 +715,17 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 
 	switch entry.typeID {
 	case plannedEntryTypeDir:
-		if err := os.MkdirAll(entry.path, fs.FileMode(entry.mode&0o777)); err != nil {
+		// mkdir(2) honors setuid/setgid/sticky in addition to the permission
+		// bits, so pass the full 12-bit POSIX mode. Directory metadata is
+		// then finalized in a second reverse-order pass once all children
+		// are in place; the create call here is best-effort and applyMetadata
+		// remains the authoritative source for the final mode.
+		if err := os.MkdirAll(entry.path, fs.FileMode(entry.mode&0o7777)); err != nil {
 			return false, fmt.Errorf("failed to create planned directory `%s`: %w", entry.path, err)
 		}
 	case plannedEntryTypeFile:
+		// open(2) only honors the 9 permission bits; setuid/setgid/sticky
+		// are applied by the immediately following applyMetadata call.
 		if entry.contentPattern.pattern != 0 {
 			if err := writePlannedFileContent(entry.path, entry.mode, entry.contentPattern); err != nil {
 				return false, err
