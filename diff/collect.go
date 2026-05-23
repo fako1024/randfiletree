@@ -130,7 +130,7 @@ func buildHardlinkGroups(pathsByIdentity map[fileIdentity][]string) [][]string {
 	return groups
 }
 
-func hashFile(file string, hashKey []byte) ([]byte, error) {
+func hashFile(file string, hashKey []byte) (sum []byte, err error) {
 	f, err := os.Open(filepath.Clean(file))
 	if err != nil {
 		return nil, err
@@ -146,8 +146,11 @@ func hashFile(file string, hashKey []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	_, err = io.Copy(hash, f)
-	return hash.Sum(nil), err
+	if _, err = io.Copy(hash, f); err != nil {
+		return nil, err
+	}
+
+	return hash.Sum(nil), nil
 }
 
 func inodeTypeFromFileMode(mode fs.FileMode) InodeType {

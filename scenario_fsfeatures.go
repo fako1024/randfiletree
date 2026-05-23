@@ -134,7 +134,7 @@ func (s *FilesystemFeatureScenario) Close() error {
 		return nil
 	}
 
-	return joinErrors(errs)
+	return errors.Join(errs...)
 }
 
 func prepareFilesystemFeatureInputs(basePath string, features []FilesystemFeature, allowEmpty bool) (string, []FilesystemFeature, error) {

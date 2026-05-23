@@ -197,7 +197,15 @@ func NumberGeneratorConstant(val int) NumberGenerator {
 	}
 }
 
-// NumberGeneratorRandomFlat generates a random number out of a range (equal probabilities)
+// NumberGeneratorRandomFlat generates a random number out of a range (equal probabilities).
+//
+// Precondition: max > min. The Option helpers (WithDirNameLengthRange,
+// WithFileNameLengthRange, WithFilesPerDirectoryRange, WithDirectoriesPerDirectoryRange,
+// WithDataLengthRange, WithContentLogicalSizeRange) validate this via
+// validateIntRange/validateContentLogicalSizeRange and surface a proper
+// configuration error before this constructor is invoked. Direct callers
+// that bypass those helpers are responsible for honoring the precondition;
+// rand.Intn enforces it on first use.
 func NumberGeneratorRandomFlat(min, max int) NumberGenerator {
 	return func(r *rand.Rand) int {
 		return r.Intn(max-min) + min

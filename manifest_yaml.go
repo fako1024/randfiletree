@@ -60,7 +60,8 @@ func ApplyScenarioManifestYAML(basePath, payload string) error {
 	return ApplyScenarioManifest(basePath, manifest)
 }
 
-// ApplyScenarioManifestYAML parses and applies a replay manifest from YAML to the generator base path.
+// ApplyScenarioManifestYAML is a convenience wrapper around the standalone
+// ApplyScenarioManifestYAML that targets the generator's configured base path.
 func (g *Generator) ApplyScenarioManifestYAML(payload string) error {
 	if g == nil {
 		return ErrNilGenerator

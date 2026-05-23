@@ -280,15 +280,16 @@ func randomizedOffset(r *rand.Rand, logicalSize, length int64) (int64, error) {
 		return 0, fmt.Errorf("segment length %d exceeds logical size %d", length, logicalSize)
 	}
 
+	// Valid offsets are [0, logicalSize-length] inclusive, i.e. remaining+1
+	// positions. Earlier revisions returned r.Int63n(remaining-1)+1 which
+	// excluded both the leading and trailing placement and biased coverage
+	// away from file boundaries.
 	remaining := logicalSize - length
 	if remaining == 0 {
 		return 0, nil
 	}
-	if remaining == 1 {
-		return 0, nil
-	}
 
-	return r.Int63n(remaining-1) + 1, nil
+	return r.Int63n(remaining + 1), nil
 }
 
 func writePlannedFileContent(path string, mode uint32, content plannedFileContent) error {

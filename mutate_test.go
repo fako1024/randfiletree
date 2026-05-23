@@ -418,7 +418,7 @@ func TestApplyOperationsTableDriven(t *testing.T) {
 				var applyErr *OperationApplyError
 				require.True(t, errors.As(err, &applyErr))
 				require.Equal(t, 0, applyErr.Index)
-				_, parseErr := ParseOperationSpec(applyErr.Spec)
+				_, parseErr := ParseOperationSpec(applyErr.ReplaySpec())
 				require.NoError(t, parseErr)
 
 				return
@@ -459,7 +459,7 @@ func TestApplyOperationsReportsReplaySpecOnFailure(t *testing.T) {
 	require.Equal(t, 1, applyErr.Index)
 	require.Contains(t, applyErr.Error(), "replay-spec=")
 
-	parsed, parseErr := ParseOperationSpec(applyErr.Spec)
+	parsed, parseErr := ParseOperationSpec(applyErr.ReplaySpec())
 	require.NoError(t, parseErr)
 	require.Equal(t, []Operation{
 		{
