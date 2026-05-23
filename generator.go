@@ -71,6 +71,9 @@ type Generator struct {
 	runMode RunMode
 
 	planEntryLimit int
+
+	coverageOptions  DeterministicCoverageOptions
+	coverageActive   bool
 }
 
 // New instantiates a new generator
@@ -138,6 +141,10 @@ func (g *Generator) RunWithMetrics(opts RunOptions) (RunMetrics, error) {
 	}
 
 	runStart := time.Now()
+
+	if g.coverageActive {
+		return g.runCoverage(runStart)
+	}
 
 	if g.hasNoConfiguration() {
 		return RunMetrics{Elapsed: time.Since(runStart)}, nil
