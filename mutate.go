@@ -55,7 +55,12 @@ func (e *OperationApplyError) ReplaySpec() string {
 
 	spec, specErr := ExportOperationSpec(e.specOps)
 	if specErr != nil {
-		spec = fmt.Sprintf("{\"exportError\":%q}", specErr.Error())
+		fallback, marshalErr := jsoniter.Marshal(map[string]string{"exportError": specErr.Error()})
+		if marshalErr != nil {
+			spec = `{"exportError":"<unencodable>"}`
+		} else {
+			spec = string(fallback)
+		}
 	}
 	e.Spec = spec
 	e.specOps = nil
