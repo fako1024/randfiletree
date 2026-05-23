@@ -54,6 +54,17 @@ Scenario contract:
   - stresses: xattr/ACL metadata parity
   - prerequisites: Linux filesystem with user xattr and POSIX ACL support
   - pitfalls: some filesystems/mounts disable ACL/xattr features by default
+- `deterministic-coverage-low`, `deterministic-coverage-medium`,
+  `deterministic-coverage-high`, `deterministic-coverage-xhigh`
+  - stresses: every supported filesystem dimension, deterministically (no
+    randomness anywhere in the plan)
+  - prerequisites: capability-gated dimensions are skipped gracefully on
+    unsupported platforms / unprivileged runs and reported in
+    `DeterministicCoverageSpec.SkippedDimensions`
+  - pitfalls: the `seed` argument is **ignored** — the same tree is produced
+    for any seed value; privileged dimensions (char/block devices,
+    `trusted.*` / `security.*` xattrs, non-effective uid/gid) require the
+    `IncludePrivileged: true` opt-in via `WithDeterministicCoverage`
 
 ### E2E Usage Examples
 
@@ -96,6 +107,107 @@ for _, descriptor := range randfiletree.BuiltInScenarioCatalog() {
 	}
 }
 ```
+
+### Deterministic Coverage Scenarios
+
+The four `deterministic-coverage-*` catalog entries (and the dedicated
+`RunDeterministicCoverage` entrypoint) produce a tree that exercises every
+supported filesystem dimension by enumerating a pairwise covering array
+across the configured capability set. Coverage is **complete already at
+`low`**; the effort level only multiplies per-cell repetition to increase
+stress without adding new dimensions.
+
+Determinism contract:
+
+- No `rand.Rand`, no `time.Now()`, no map-iteration order, no process state
+  influences the synthesized plan.
+- Same `(basePath, opts)` => byte-identical plan and (with `RunModeReplace`
+  on the same `basePath`) byte-identical on-disk tree.
+- All entries — including symlinks and special files — carry a fixed
+  deterministic atime/mtime when the timestamp capability is enabled.
+
+Pairwise dimensions exercised (subject to capability gates):
+
+- mode classes (regular, exec, setuid, setgid, sticky, setuid+setgid)
+- file content patterns (`Plain`, `DenseRandom`, `SparseHoles`,
+  `RepeatedBlocks`, `PartialRangeOverwrite`)
+- file size classes straddling the 64 KiB chunk boundary plus a multi-MiB
+  sample
+- byte-edge name classes (basic, leading spaces, trailing spaces, leading
+  dots, NL/CR/TAB, control chars, invalid UTF-8, Unicode combining,
+  near-`NameMaxBytes`)
+- symlink strategies (absolute, relative, dangling, self-referential,
+  chained, cycle)
+- hardlink group sizes (2, 3, 4)
+- special file types (FIFO, socket; char/block devices when privileged)
+- xattr variants (user.* short / empty / large / binary; trusted.* /
+  security.* when privileged)
+- ACL variants (base, named-user+group+mask, default-on-dir)
+- timestamp variants (epoch, fixed past/future, atime≷mtime)
+- metadata bundles (none, ownership, timestamps, full)
+
+Effort scale (entry counts on Linux with default capabilities):
+
+| Effort | Multiplier | Approx entries (Linux, unprivileged) |
+|---|---|---|
+| `low`    | x1  | ~700    |
+| `medium` | x3  | ~2,000  |
+| `high`   | x10 | ~7,000  |
+| `xhigh`  | x50 | ~33,000 |
+
+All effort levels stay below the default `planEntryLimit` of 100,000.
+
+Direct entrypoint:
+
+```go
+spec, metrics, err := randfiletree.RunDeterministicCoverage(basePath, randfiletree.DeterministicCoverageOptions{
+    Effort:            randfiletree.DeterministicCoverageEffortLow,
+    IncludeLinuxOnly:  true,
+    IncludePrivileged: false,
+    RunMode:           randfiletree.RunModeReplace,
+})
+if err != nil {
+    return err
+}
+
+for _, skipped := range spec.SkippedDimensions {
+    log.Printf("coverage skipped %s: %s", skipped.Name, skipped.Reason)
+}
+```
+
+Catalog wrapper:
+
+```go
+spec, err := randfiletree.BuildBuiltInScenario(
+    randfiletree.ScenarioNameDeterministicCoverageLow,
+    0, // seed is ignored for coverage scenarios
+)
+if err != nil {
+    return err
+}
+
+g, err := randfiletree.NewWithOptions(basePath, spec.Options...)
+if err != nil {
+    return err
+}
+
+if err := g.Run(); err != nil {
+    return err
+}
+```
+
+Caveats:
+
+- ACL parity diffs (`diff.Options.CompareACLs`) and access-time parity
+  (`CompareAccessTime`) are not strictly comparable on trees containing
+  symlinks: Linux rejects ACL xattr reads on symlinks (EOPNOTSUPP), and
+  atime is updated by the diff's own file reads. The coverage scenario
+  still **applies** ACLs and timestamps; the limitation is in the
+  comparison step.
+- Absolute-strategy symlinks encode `basePath` verbatim, so two coverage
+  trees built at **different** base paths will not byte-compare. Use the
+  same base path with `RunModeReplace` (or compare plans rather than
+  on-disk trees) for strict diff parity.
 
 ### Performance Harness
 

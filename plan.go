@@ -90,6 +90,12 @@ func (state *planState) appendEntry(plan *runPlan, entry plannedEntry) error {
 }
 
 func (g *Generator) planRun() (runPlan, error) {
+	if g.coverageActive {
+		opts := normalizeDeterministicCoverageOptions(g.coverageOptions)
+		plan, _, err := enumerateCoveragePlan(g.basePath, opts)
+		return plan, err
+	}
+
 	state := planState{
 		rnd: g.rndSrc,
 		used: map[string]struct{}{
@@ -588,6 +594,19 @@ type applyStats struct {
 	elapsed              time.Duration
 }
 
+// applyPrebuiltPlan applies an externally synthesized plan against the
+// generator's base path without invoking planRun or random-source state. The
+// coverage entrypoint uses this to bypass validateRunConfiguration (no
+// random generators are configured) while reusing the apply pipeline.
+func (g *Generator) applyPrebuiltPlan(plan runPlan) (applyStats, error) {
+	execCtx, err := newExecutionContext(FaultProfile{})
+	if err != nil {
+		return applyStats{}, err
+	}
+
+	return g.applyRunPlan(plan, execCtx)
+}
+
 func (g *Generator) applyRunPlan(plan runPlan, execCtx executionContext) (applyStats, error) {
 	start := time.Now()
 	stats := applyStats{}
@@ -742,6 +761,9 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 		if err := os.Symlink(entry.linkTarget, entry.path); err != nil {
 			return false, fmt.Errorf("failed to create planned symlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
 		}
+		if err := applyLinkMetadata(entry.path, entry.metadata); err != nil {
+			return false, fmt.Errorf("failed to apply metadata for planned symlink `%s`: %w", entry.path, err)
+		}
 	case plannedEntryTypeHardlink:
 		if err := os.Link(entry.linkTarget, entry.path); err != nil {
 			return false, fmt.Errorf("failed to create planned hardlink `%s` -> `%s`: %w", entry.path, entry.linkTarget, err)
@@ -755,6 +777,9 @@ func (g *Generator) applyPlannedEntry(entry plannedEntry) (bool, error) {
 			entry.specialDeviceMinor,
 		); err != nil {
 			return false, err
+		}
+		if err := applyMetadata(entry.path, entry.mode, entry.metadata); err != nil {
+			return false, fmt.Errorf("failed to apply metadata for planned special file `%s`: %w", entry.path, err)
 		}
 	default:
 		return false, fmt.Errorf("unknown planned entry type %d for path `%s`", entry.typeID, entry.path)
