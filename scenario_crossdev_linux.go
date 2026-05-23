@@ -172,7 +172,7 @@ func (s *CrossDeviceScenario) Close() error {
 	}
 
 	if len(errs) > 0 {
-		return joinErrors(errs)
+		return errors.Join(errs...)
 	}
 
 	return nil

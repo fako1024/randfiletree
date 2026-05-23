@@ -199,16 +199,14 @@ func NumberGeneratorConstant(val int) NumberGenerator {
 
 // NumberGeneratorRandomFlat generates a random number out of a range (equal probabilities).
 //
-// Panics at construction time if max <= min, since r.Intn would panic on a
-// non-positive range. Option helpers validate this via validateIntRange so
-// configuration errors surface before the generator is ever invoked, but
-// callers using NumberGeneratorRandomFlat directly receive the same
-// fail-fast guarantee with a clearer message.
+// Precondition: max > min. The Option helpers (WithDirNameLengthRange,
+// WithFileNameLengthRange, WithFilesPerDirectoryRange, WithDirectoriesPerDirectoryRange,
+// WithDataLengthRange, WithContentLogicalSizeRange) validate this via
+// validateIntRange/validateContentLogicalSizeRange and surface a proper
+// configuration error before this constructor is invoked. Direct callers
+// that bypass those helpers are responsible for honoring the precondition;
+// rand.Intn enforces it on first use.
 func NumberGeneratorRandomFlat(min, max int) NumberGenerator {
-	if max <= min {
-		panic(fmt.Sprintf("NumberGeneratorRandomFlat: max must be > min, got min=%d max=%d", min, max))
-	}
-
 	return func(r *rand.Rand) int {
 		return r.Intn(max-min) + min
 	}

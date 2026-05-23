@@ -78,9 +78,3 @@ var (
 	ErrScenarioManifestChecksumAlgorithmUnsupported = errors.New("scenario manifest checksum algorithm unsupported")
 	ErrScenarioManifestCapabilityUnsupported        = errors.New("scenario manifest capability unsupported")
 )
-
-func joinErrors(errs []error) error {
-	// errors.Join preserves the underlying chain so callers can still match
-	// individual sentinels via errors.Is on the combined return value.
-	return errors.Join(errs...)
-}
