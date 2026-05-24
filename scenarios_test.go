@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/fako1024/randfiletree/diff"
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,17 @@ func TestBuildBuiltInScenarioDeterministicSparseLargeSeed(t *testing.T) {
 
 	require.NoError(t, runBuiltInScenarioForTest(leftPath, ScenarioNameSparseLarge, 42))
 	require.NoError(t, runBuiltInScenarioForTest(rightPath, ScenarioNameSparseLarge, 42))
+
+	// The sparse-large scenario does not configure WithTimestamps, so the
+	// created files inherit wall-clock mtime from the filesystem at
+	// creation time. On slower I/O paths (notably Windows CI) the two
+	// runs can straddle a one-second boundary, and diff.DefaultOptions()
+	// includes ModTime in its projection. Normalize mtime on both trees
+	// to a fixed value so the diff exercises content/structure parity,
+	// which is what this test is asserting.
+	normalizationTimestamp := time.Unix(1_700_000_000, 0).UTC()
+	require.NoError(t, normalizeTreeMTime(leftPath, normalizationTimestamp))
+	require.NoError(t, normalizeTreeMTime(rightPath, normalizationTimestamp))
 
 	require.NoError(t, diff.PathsWithOptions(leftPath, rightPath, diff.DefaultOptions()))
 }
