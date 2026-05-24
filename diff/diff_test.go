@@ -85,6 +85,12 @@ func TestDanglingSymlinkParity(t *testing.T) {
 	require.NoError(t, os.Symlink("missing_target", filepath.Join(pathA, "link.txt")))
 	require.NoError(t, os.Symlink("missing_target", filepath.Join(pathB, "link.txt")))
 
+	// Normalize directory mtimes so the diff is not flaky when the two
+	// MkdirAll/Symlink sequences straddle a wall-clock second boundary.
+	ts := time.Unix(1_700_000_000, 0)
+	require.NoError(t, normalizeTreeMTime(pathA, ts))
+	require.NoError(t, normalizeTreeMTime(pathB, ts))
+
 	require.NoError(t, Paths(pathA, pathB))
 }
 
@@ -108,6 +114,12 @@ func TestHardlinkTopologyParity(t *testing.T) {
 	require.NoError(t, os.Link(aTarget, filepath.Join(pathA, "link2.txt")))
 	require.NoError(t, os.Link(bTarget, filepath.Join(pathB, "link1.txt")))
 	require.NoError(t, os.Link(bTarget, filepath.Join(pathB, "link2.txt")))
+
+	// Normalize mtimes so two-tree parity is not flaky when the writes
+	// straddle a wall-clock second boundary (observed on Windows CI).
+	ts := time.Unix(1_700_000_000, 0)
+	require.NoError(t, normalizeTreeMTime(pathA, ts))
+	require.NoError(t, normalizeTreeMTime(pathB, ts))
 
 	require.NoError(t, Paths(pathA, pathB))
 }
@@ -160,6 +172,12 @@ func TestPathsWithOptionsHashToggle(t *testing.T) {
 	require.NoError(t, os.Chtimes(fileA, ts, ts))
 	require.NoError(t, os.Chtimes(fileB, ts, ts))
 
+	// Parent directory mtimes are wall-clock at creation and differ
+	// between the two MkdirAll/WriteFile sequences on slower CI hosts.
+	// Pin them so the diff exercises content semantics, not timing.
+	require.NoError(t, os.Chtimes(pathA, ts, ts))
+	require.NoError(t, os.Chtimes(pathB, ts, ts))
+
 	optsNoHash := DefaultOptions()
 	optsNoHash.CompareContentHash = false
 	require.NoError(t, PathsWithOptions(pathA, pathB, optsNoHash))
@@ -188,6 +206,13 @@ func TestPathsWithOptionsTimestampPrecisionToggle(t *testing.T) {
 	timeB := time.Unix(1_700_000_000, 900)
 	require.NoError(t, os.Chtimes(fileA, timeA, timeA))
 	require.NoError(t, os.Chtimes(fileB, timeB, timeB))
+
+	// Parent directory mtimes are wall-clock at creation. Pin them to a
+	// shared anchor so the seconds-precision branch isn't sensitive to
+	// the wall-clock interval between the two MkdirAll calls.
+	dirAnchor := time.Unix(1_700_000_000, 0)
+	require.NoError(t, os.Chtimes(pathA, dirAnchor, dirAnchor))
+	require.NoError(t, os.Chtimes(pathB, dirAnchor, dirAnchor))
 
 	infoA, err := os.Stat(fileA)
 	require.NoError(t, err)
@@ -371,6 +396,12 @@ func TestPathsWithOptionsHardlinkTopologyToggle(t *testing.T) {
 	require.NoError(t, os.Chtimes(aTarget, ts, ts))
 	require.NoError(t, os.Chtimes(bTarget, ts, ts))
 	require.NoError(t, os.Chtimes(filepath.Join(pathB, "link.txt"), ts, ts))
+
+	// Parent directories are created via MkdirAll and inherit wall-clock
+	// mtime; pin them so the topology-disabled diff isn't flaky when the
+	// two tree setups straddle a one-second boundary.
+	require.NoError(t, os.Chtimes(pathA, ts, ts))
+	require.NoError(t, os.Chtimes(pathB, ts, ts))
 
 	optsNoHardlink := DefaultOptions()
 	optsNoHardlink.CompareHardlinkTopology = false
