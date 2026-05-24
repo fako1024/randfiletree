@@ -28,10 +28,12 @@ func TestCoverageApplyDeterministicSameBasePath(t *testing.T) {
 		t.Skip("coverage end-to-end apply test requires linux")
 	}
 
-	for _, effort := range []DeterministicCoverageEffort{
-		DeterministicCoverageEffortLow,
-		DeterministicCoverageEffortMedium,
-	} {
+	efforts := []DeterministicCoverageEffort{DeterministicCoverageEffortLow}
+	if !testing.Short() {
+		efforts = append(efforts, DeterministicCoverageEffortMedium)
+	}
+
+	for _, effort := range efforts {
 		effort := effort
 		t.Run(effort.String(), func(t *testing.T) {
 			base := filepath.Join(t.TempDir(), "replay")
@@ -116,9 +118,9 @@ func TestCoverageCatalogEntriesApplyEndToEnd(t *testing.T) {
 		t.Skip("coverage catalog end-to-end test requires linux")
 	}
 
-	names := []string{
-		ScenarioNameDeterministicCoverageLow,
-		ScenarioNameDeterministicCoverageMedium,
+	names := []string{ScenarioNameDeterministicCoverageLow}
+	if !testing.Short() {
+		names = append(names, ScenarioNameDeterministicCoverageMedium)
 	}
 
 	for _, name := range names {

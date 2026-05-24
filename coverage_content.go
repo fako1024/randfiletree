@@ -42,18 +42,24 @@ var coverageContentClassAll = []coverageContentClass{
 	coverageContentClassPartialRangeOverwrite,
 }
 
-// coverageSizeClass enumerates the file-size dimensions. The numeric values
-// are chosen to straddle the 64 KiB content-write chunk boundary and to
-// produce one multi-MiB sample.
+// coverageSizeClass enumerates the file-size dimensions. The values are
+// intentionally small to keep the total on-disk footprint of the coverage
+// tree bounded on CI runners with constrained tmpfs: the goal is to exercise
+// the content-pattern code paths (zero, one-byte, boundary-around-the
+// 64 KiB write chunk, and one multi-chunk sample with a tail) rather than
+// to stress allocator throughput. The largest class never exceeds two write
+// chunks plus a tail byte (~128 KiB) so even xhigh-effort runs stay well
+// below tmpfs and CI ephemeral-disk limits.
 type coverageSizeClass uint8
 
 const (
 	coverageSizeClassZero coverageSizeClass = iota
 	coverageSizeClassOne
+	coverageSizeClassTiny
 	coverageSizeClassBelowChunk
 	coverageSizeClassExactChunk
 	coverageSizeClassAboveChunk
-	coverageSizeClassMultiMiB
+	coverageSizeClassTwoChunksPlusTail
 )
 
 func (c coverageSizeClass) String() string {
@@ -62,14 +68,16 @@ func (c coverageSizeClass) String() string {
 		return "size-0"
 	case coverageSizeClassOne:
 		return "size-1"
+	case coverageSizeClassTiny:
+		return "size-tiny"
 	case coverageSizeClassBelowChunk:
 		return "size-below-chunk"
 	case coverageSizeClassExactChunk:
 		return "size-exact-chunk"
 	case coverageSizeClassAboveChunk:
 		return "size-above-chunk"
-	case coverageSizeClassMultiMiB:
-		return "size-multi-mib"
+	case coverageSizeClassTwoChunksPlusTail:
+		return "size-two-chunks-plus-tail"
 	default:
 		return fmt.Sprintf("unknown(%d)", c)
 	}
@@ -78,10 +86,11 @@ func (c coverageSizeClass) String() string {
 var coverageSizeClassAll = []coverageSizeClass{
 	coverageSizeClassZero,
 	coverageSizeClassOne,
+	coverageSizeClassTiny,
 	coverageSizeClassBelowChunk,
 	coverageSizeClassExactChunk,
 	coverageSizeClassAboveChunk,
-	coverageSizeClassMultiMiB,
+	coverageSizeClassTwoChunksPlusTail,
 }
 
 func coverageSizeBytes(class coverageSizeClass) int64 {
@@ -91,14 +100,16 @@ func coverageSizeBytes(class coverageSizeClass) int64 {
 		return 0
 	case coverageSizeClassOne:
 		return 1
+	case coverageSizeClassTiny:
+		return 16
 	case coverageSizeClassBelowChunk:
 		return chunk - 1
 	case coverageSizeClassExactChunk:
 		return chunk
 	case coverageSizeClassAboveChunk:
 		return chunk + 1
-	case coverageSizeClassMultiMiB:
-		return (1 << 20) + 7
+	case coverageSizeClassTwoChunksPlusTail:
+		return 2*chunk + 7
 	default:
 		return chunk
 	}

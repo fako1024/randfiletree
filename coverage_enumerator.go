@@ -1107,7 +1107,10 @@ func coverageXAttrValueFor(variant coverageXAttrVariant, cellID uint64) map[stri
 	case coverageXAttrVariantUserEmpty:
 		return map[string][]byte{"user.coverage.empty": nil}
 	case coverageXAttrVariantUserLarge:
-		return map[string][]byte{"user.coverage.large": coverageBytesOfLength(4096, cellID)}
+		// 1 KiB exercises the "non-trivial xattr value" code path without
+		// pushing per-inode xattr budgets on filesystems that cap user.*
+		// totals (e.g. ext4 default 4 KiB across all xattrs of one inode).
+		return map[string][]byte{"user.coverage.large": coverageBytesOfLength(1024, cellID)}
 	case coverageXAttrVariantUserBinary:
 		return map[string][]byte{"user.coverage.binary": coverageBinaryXAttrPayload(cellID)}
 	case coverageXAttrVariantTrusted:
