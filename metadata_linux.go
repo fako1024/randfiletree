@@ -12,6 +12,54 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// applyLinkMetadata applies symlink-specific metadata. Symlinks do not honor
+// chmod (Linux does not provide lchmod), and the user.* xattr / POSIX ACL
+// namespaces are rejected on symlinks (EPERM/EOPNOTSUPP), so this helper
+// applies only ownership and atime/mtime — both via -nofollow variants so the
+// symlink inode itself is touched, not its target.
+func applyLinkMetadata(path string, metadata metadataConfig) error {
+	if metadata.hasOwnership {
+		if metadata.uid < 0 {
+			return fmt.Errorf("uid must be >= 0, got %d", metadata.uid)
+		}
+		if metadata.gid < 0 {
+			return fmt.Errorf("gid must be >= 0, got %d", metadata.gid)
+		}
+
+		if err := os.Lchown(path, metadata.uid, metadata.gid); err != nil {
+			if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+				return fmt.Errorf(
+					"%w for `%s` (uid=%d gid=%d): %v",
+					ErrOwnershipMetadataPermissionDenied,
+					path,
+					metadata.uid,
+					metadata.gid,
+					err,
+				)
+			}
+
+			return fmt.Errorf("failed to set symlink ownership metadata for `%s` to uid=%d gid=%d: %w", path, metadata.uid, metadata.gid, err)
+		}
+	}
+
+	if metadata.hasTimestamps {
+		ts := []unix.Timespec{
+			unix.NsecToTimespec(metadata.atime.UnixNano()),
+			unix.NsecToTimespec(metadata.mtime.UnixNano()),
+		}
+
+		if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return fmt.Errorf(
+				"failed to set atime/mtime symlink metadata for `%s` with nanosecond precision: %w",
+				path,
+				err,
+			)
+		}
+	}
+
+	return nil
+}
+
 func applyMetadata(path string, mode uint32, metadata metadataConfig) error {
 	if metadata.hasOwnership {
 		if metadata.uid < 0 {

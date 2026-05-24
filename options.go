@@ -712,6 +712,24 @@ func WithDirectoriesPerDirectoryRange(min, max int) Option {
 	}
 }
 
+// WithDeterministicCoverage configures the generator to apply the
+// deterministic coverage scenario instead of the random plan/apply flow. When
+// this option is set, Run/RunWithMetrics bypass random-source state, build
+// the pairwise coverage plan from the supplied options, and apply it. The
+// generator's other random generators are ignored.
+func WithDeterministicCoverage(opts DeterministicCoverageOptions) Option {
+	return func(g *Generator) error {
+		if err := validateDeterministicCoverageEffort(opts.Effort); err != nil {
+			return err
+		}
+
+		g.coverageActive = true
+		g.coverageOptions = opts
+
+		return nil
+	}
+}
+
 // WithDataLengthRange sets a randomized data generator with lengths in the range [min, max).
 func WithDataLengthRange(min, max int) Option {
 	return func(g *Generator) error {

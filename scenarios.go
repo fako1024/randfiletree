@@ -25,6 +25,11 @@ const (
 	ScenarioNameMetadataHeavy = "metadata-heavy"
 	ScenarioNameSparseLarge   = "sparse-large"
 	ScenarioNameXAttrACLHeavy = "xattr-acl-heavy"
+
+	ScenarioNameDeterministicCoverageLow    = "deterministic-coverage-low"
+	ScenarioNameDeterministicCoverageMedium = "deterministic-coverage-medium"
+	ScenarioNameDeterministicCoverageHigh   = "deterministic-coverage-high"
+	ScenarioNameDeterministicCoverageXHigh  = "deterministic-coverage-xhigh"
 )
 
 // BuiltInScenarioDescriptor describes one catalog scenario entry.
@@ -56,6 +61,10 @@ var builtInScenarioOrder = []string{
 	ScenarioNameMetadataHeavy,
 	ScenarioNameSparseLarge,
 	ScenarioNameXAttrACLHeavy,
+	ScenarioNameDeterministicCoverageLow,
+	ScenarioNameDeterministicCoverageMedium,
+	ScenarioNameDeterministicCoverageHigh,
+	ScenarioNameDeterministicCoverageXHigh,
 }
 
 var builtInScenarioAliases = map[string]string{
@@ -73,6 +82,11 @@ var builtInScenarioAliases = map[string]string{
 
 	ScenarioNameXAttrACLHeavy:           ScenarioNameXAttrACLHeavy,
 	ScenarioNameXAttrACLHeavy + "-tree": ScenarioNameXAttrACLHeavy,
+
+	ScenarioNameDeterministicCoverageLow:    ScenarioNameDeterministicCoverageLow,
+	ScenarioNameDeterministicCoverageMedium: ScenarioNameDeterministicCoverageMedium,
+	ScenarioNameDeterministicCoverageHigh:   ScenarioNameDeterministicCoverageHigh,
+	ScenarioNameDeterministicCoverageXHigh:  ScenarioNameDeterministicCoverageXHigh,
 }
 
 var builtInScenarioTemplates = map[string]builtInScenarioTemplate{
@@ -162,6 +176,58 @@ var builtInScenarioTemplates = map[string]builtInScenarioTemplate{
 		},
 		build: buildXAttrACLHeavyScenarioOptions,
 	},
+	ScenarioNameDeterministicCoverageLow: {
+		descriptor:    deterministicCoverageDescriptor(ScenarioNameDeterministicCoverageLow, DeterministicCoverageEffortLow),
+		build:         buildDeterministicCoverageScenarioOptions(DeterministicCoverageEffortLow),
+	},
+	ScenarioNameDeterministicCoverageMedium: {
+		descriptor:    deterministicCoverageDescriptor(ScenarioNameDeterministicCoverageMedium, DeterministicCoverageEffortMedium),
+		build:         buildDeterministicCoverageScenarioOptions(DeterministicCoverageEffortMedium),
+	},
+	ScenarioNameDeterministicCoverageHigh: {
+		descriptor:    deterministicCoverageDescriptor(ScenarioNameDeterministicCoverageHigh, DeterministicCoverageEffortHigh),
+		build:         buildDeterministicCoverageScenarioOptions(DeterministicCoverageEffortHigh),
+	},
+	ScenarioNameDeterministicCoverageXHigh: {
+		descriptor:    deterministicCoverageDescriptor(ScenarioNameDeterministicCoverageXHigh, DeterministicCoverageEffortXHigh),
+		build:         buildDeterministicCoverageScenarioOptions(DeterministicCoverageEffortXHigh),
+	},
+}
+
+func deterministicCoverageDescriptor(name string, effort DeterministicCoverageEffort) BuiltInScenarioDescriptor {
+	return BuiltInScenarioDescriptor{
+		Name: name,
+		Intent: fmt.Sprintf(
+			"Apply the deterministic pairwise coverage matrix at %q effort. Seed is ignored; the tree is identical for any seed value.",
+			effort.String(),
+		),
+		RequiredCapabilities: []BuiltInScenarioCapability{
+			BuiltInScenarioCapabilityHardlinkCreation,
+			BuiltInScenarioCapabilitySymlinkCreation,
+			BuiltInScenarioCapabilityContentPatterns,
+			BuiltInScenarioCapabilityLinuxTimestampMetadata,
+			BuiltInScenarioCapabilityLinuxXAttrMetadata,
+			BuiltInScenarioCapabilityLinuxACLMetadata,
+		},
+		Prerequisites: []string{
+			"Capability-gated dimensions are skipped gracefully when unsupported; the scenario still succeeds and reports SkippedDimensions in the returned spec.",
+		},
+		Pitfalls: []string{
+			"The seed parameter is ignored; pass any value.",
+			"Privileged dimensions (char/block devices, trusted.*/security.* xattrs, non-effective uid/gid) are only included when the caller sets IncludePrivileged via WithDeterministicCoverage.",
+		},
+	}
+}
+
+func buildDeterministicCoverageScenarioOptions(effort DeterministicCoverageEffort) func(seed int64) []Option {
+	return func(seed int64) []Option {
+		_ = seed
+		return []Option{
+			WithDeterministicCoverage(DeterministicCoverageOptions{
+				Effort: effort,
+			}),
+		}
+	}
 }
 
 // BuiltInScenarioCatalog returns all built-in scenarios in deterministic order.
