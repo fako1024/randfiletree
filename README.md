@@ -73,12 +73,12 @@ Generic flow:
 ```go
 basePath := filepath.Join(os.TempDir(), "randfiletree-hardlink")
 
-spec, err := randfiletree.BuildBuiltInScenario(randfiletree.ScenarioNameHardlinkHeavy, 42)
+scenarioSpec, err := randfiletree.BuildBuiltInScenario(randfiletree.ScenarioNameHardlinkHeavy, 42)
 if err != nil {
 	return err
 }
 
-g, err := randfiletree.NewWithOptions(basePath, spec.Options...)
+g, err := randfiletree.NewWithOptions(basePath, scenarioSpec.Options...)
 if err != nil {
 	return err
 }
@@ -92,12 +92,12 @@ Select by catalog descriptor:
 
 ```go
 for _, descriptor := range randfiletree.BuiltInScenarioCatalog() {
-	spec, err := randfiletree.BuildBuiltInScenario(descriptor.Name, 20260522)
+	scenarioSpec, err := randfiletree.BuildBuiltInScenario(descriptor.Name, 20260522)
 	if err != nil {
 		return err
 	}
 
-	g, err := randfiletree.NewWithOptions(filepath.Join(basePath, descriptor.Name), spec.Options...)
+	g, err := randfiletree.NewWithOptions(filepath.Join(basePath, descriptor.Name), scenarioSpec.Options...)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ All effort levels stay below the default `planEntryLimit` of 100,000.
 Direct entrypoint:
 
 ```go
-spec, metrics, err := randfiletree.RunDeterministicCoverage(basePath, randfiletree.DeterministicCoverageOptions{
+coverageSpec, metrics, err := randfiletree.RunDeterministicCoverage(basePath, randfiletree.DeterministicCoverageOptions{
     Effort:            randfiletree.DeterministicCoverageEffortLow,
     IncludeLinuxOnly:  true,
     IncludePrivileged: false,
@@ -170,15 +170,41 @@ if err != nil {
     return err
 }
 
-for _, skipped := range spec.SkippedDimensions {
+log.Printf("planned=%d applied=%d", metrics.Nodes, metrics.AppliedEntries)
+
+for _, skipped := range coverageSpec.SkippedDimensions {
     log.Printf("coverage skipped %s: %s", skipped.Name, skipped.Reason)
+}
+```
+
+`RunDeterministicCoverage` applies the generated deterministic plan immediately
+and returns a `DeterministicCoverageSpec` report plus `RunMetrics`; it does not
+return `[]Option`.
+
+Generator mode (without catalog wrapper):
+
+```go
+g, err := randfiletree.NewWithOptions(basePath,
+	randfiletree.WithRunMode(randfiletree.RunModeReplace),
+	randfiletree.WithDeterministicCoverage(randfiletree.DeterministicCoverageOptions{
+		Effort:            randfiletree.DeterministicCoverageEffortLow,
+		IncludeLinuxOnly:  true,
+		IncludePrivileged: false,
+	}),
+)
+if err != nil {
+	return err
+}
+
+if err := g.Run(); err != nil {
+	return err
 }
 ```
 
 Catalog wrapper:
 
 ```go
-spec, err := randfiletree.BuildBuiltInScenario(
+scenarioSpec, err := randfiletree.BuildBuiltInScenario(
     randfiletree.ScenarioNameDeterministicCoverageLow,
     0, // seed is ignored for coverage scenarios
 )
@@ -186,7 +212,7 @@ if err != nil {
     return err
 }
 
-g, err := randfiletree.NewWithOptions(basePath, spec.Options...)
+g, err := randfiletree.NewWithOptions(basePath, scenarioSpec.Options...)
 if err != nil {
     return err
 }

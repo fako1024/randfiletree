@@ -43,7 +43,8 @@ type DeterministicCoverageOptions struct {
 
 	// IncludeLinuxOnly enables dimensions that require Linux kernel
 	// features (special files, ownership/timestamp metadata, xattr, ACL).
-	// Defaults to runtime.GOOS == "linux" via WithIncludeLinuxOnlyDefault.
+	// Defaults to runtime.GOOS == "linux" via
+	// normalizeDeterministicCoverageOptions.
 	IncludeLinuxOnly bool
 
 	// IncludePrivileged enables dimensions that typically require root or
@@ -266,4 +267,3 @@ func (g *Generator) runCoverage(runStart time.Time) (RunMetrics, error) {
 
 	return metrics, nil
 }
-
