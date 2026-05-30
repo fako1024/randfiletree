@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/fako1024/randfiletree/diff"
@@ -168,6 +169,34 @@ func TestCoverageRunModeReplaceClearsBase(t *testing.T) {
 
 	_, err = os.Stat(filepath.Join(base, "pre-existing.txt"))
 	require.ErrorIs(t, err, os.ErrNotExist, "pre-existing file should be cleared by RunModeReplace")
+}
+
+func TestInspectCoveragePlanModes(t *testing.T) {
+	base := "/dev/shm/rapidsafe_tests/input/debug_mode"
+	opts := DeterministicCoverageOptions{
+		Effort:            DeterministicCoverageEffortLow,
+		IncludeLinuxOnly:  true,
+		IncludePrivileged: false,
+	}
+
+	plan, _, err := enumerateCoveragePlan(base, opts)
+	if err != nil {
+		t.Fatalf("enumerateCoveragePlan failed: %v", err)
+	}
+
+	for _, e := range plan.entries {
+		if e.typeID != plannedEntryTypeDir {
+			continue
+		}
+		// look for the problematic cell-dirs parent
+		if strings.Contains(e.path, "cell-dirs-00003") {
+			t.Logf("dir entry: %s mode=%#o", e.path, e.mode)
+		}
+		// also log any directory entries that have owner-exec bit missing
+		if e.mode&0o100 == 0 {
+			t.Logf("dir entry without owner-x in plan: %s mode=%#o", e.path, e.mode)
+		}
+	}
 }
 
 func BenchmarkDeterministicCoverage(b *testing.B) {

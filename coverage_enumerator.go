@@ -656,7 +656,13 @@ func coverageDefaultUserXAttrs(cellID uint64) map[string][]byte {
 	}
 }
 
-func coverageDefaultACLEntries() []string {
+func coverageDefaultACLEntries(isDir bool) []string {
+	if isDir {
+		// Directories need execute bits to remain traversable when ACL masks are
+		// applied. Preserve user execute and group execute where appropriate.
+		return []string{"u::rwx", "g::r-x", "o::---"}
+	}
+
 	return []string{"u::rw-", "g::r--", "o::---"}
 }
 
@@ -693,7 +699,7 @@ func enumerateCoverageDirSubTree(b *coveragePlanBuilder, multiplier int) error {
 				metaClass, caps, cellID, idx+rep,
 				coverageTimestampVariantPast,
 				coverageDefaultUserXAttrs(cellID),
-				coverageDefaultACLEntries(),
+				coverageDefaultACLEntries(true),
 			)
 			if err := b.appendDir(dirPath, coverageModeForDir(modeClass), metadata); err != nil {
 				return err
@@ -768,7 +774,7 @@ func enumerateCoverageFileSubTree(b *coveragePlanBuilder, multiplier int) error 
 				metaClass, caps, cellID, idx+rep,
 				coverageTimestampForCell(cellID),
 				coverageDefaultUserXAttrs(cellID),
-				coverageDefaultACLEntries(),
+				coverageDefaultACLEntries(false),
 			)
 
 			if err := b.appendFile(entry); err != nil {
